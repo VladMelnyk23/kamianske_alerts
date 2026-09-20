@@ -30,7 +30,7 @@ def env(name: str, default: str = "") -> str:
 
 # ---------- Налаштування (Railway -> Variables) ----------
 BOT_TOKEN = env("BOT_TOKEN")
-ALERTS_TOKEN = env("ALERTS_TOKEN")
+ALERTS_TOKEN = env("ALERTS_TOKEN") or env("ALERTS_API_KEY")
 if ALERTS_TOKEN.lower().startswith("bearer "):
     ALERTS_TOKEN = ALERTS_TOKEN[7:].strip()
 PORT = int(env("PORT", "8080"))
