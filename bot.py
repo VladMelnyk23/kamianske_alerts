@@ -44,7 +44,7 @@ LOCATION_MATCH = env("LOCATION_MATCH", "Кам'янськ")
 SIREN_FILE = env("SIREN_FILE", "alarm.mp3")  # файл сирени в репозиторії
 # Інші загрози (хімічна, радіаційна, інші) пишуться в журнал без сирени.
 # OTHER_SCOPE: "oblast" (уся область, за замовч.) або "city" (лише Кам'янське)
-OTHER_SCOPE = env("OTHER_SCOPE", "oblast").lower()
+OTHER_SCOPE = env("OTHER_SCOPE", "city").lower()
 OTHER_NOTIFY = env("OTHER_NOTIFY", "0") == "1"  # тихі повідомлення в Telegram
 TEST_KEY = env("TEST_KEY")  # пароль для /api/test (без нього тест вимкнений)
 
@@ -103,8 +103,8 @@ def is_siren(a: dict) -> bool:
 
 def is_other(a: dict) -> bool:
     """Інша загроза (без сирени)."""
-    if is_siren(a):
-        return False
+    if is_siren(a) or a.get("alert_type") == "air_raid":
+        return False  # повітряні тривоги інших локацій нас не цікавлять
     if OTHER_SCOPE == "city":
         return is_mine(a)
     return norm(OBLAST) == norm(a.get("location_oblast"))
@@ -118,12 +118,57 @@ TYPE_LABELS = {
 }
 
 
+THREAT_KEYWORDS = [
+    ("шахед", "Шахеди"),
+    ("бпла", "БпЛА"),
+    ("дрон", "БпЛА"),
+    ("крилат", "Крилаті ракети"),
+    ("кинджал", "Кинджал"),
+    ("ракет", "Ракети"),
+    ("авіац", "Авіація"),
+    ("артилер", "Артобстріл"),
+]
+
+
+def threat_labels(a: dict) -> list[str]:
+    text = norm(a.get("notes"))
+    out = ["Балістика"] if is_ballistic(a) else []
+    for kw, label in THREAT_KEYWORDS:
+        if kw in text and label not in out:
+            out.append(label)
+    return out
+
+
+def describe(a: dict) -> str:
+    """Коментар до тривоги: тип загрози (шахеди, балістика...) або примітка з API."""
+    labels = threat_labels(a)
+    if labels:
+        return ", ".join(labels)
+    notes = (a.get("notes") or "").strip()
+    if notes:
+        return notes
+    return TYPE_LABELS.get(a.get("alert_type"), "Повітряна тривога")
+
+
 # ---------- Стан ----------
+# Залишаємо в журналі лише записи по Кам'янському (чистимо старі чужі записи)
+if OTHER_SCOPE == "city":
+    for _r in db.execute("SELECT api_id, location FROM alerts").fetchall():
+        if norm(LOCATION_MATCH) not in norm(_r["location"]):
+            db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
+    db.commit()
+
 state = {"active": False, "ballistic": False, "since": None, "updated": None, "error": None}
 open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute(
         "SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL AND COALESCE(category,'siren')='siren'"
+    )
+}
+siren_desc: dict[int, str] = {
+    r["api_id"]: r["notes"] or ""
+    for r in db.execute(
+        "SELECT api_id, notes FROM alerts WHERE ended_at IS NULL AND COALESCE(category,'siren')='siren'"
     )
 }
 other_open: dict[int, str] = {
@@ -171,17 +216,22 @@ def process(mine: list[dict]):
                     a.get("alert_type"),
                     int(b),
                     a.get("location_title"),
-                    a.get("notes") or "",
+                    describe(a),
                 ),
             )
             open_ids[aid] = b
         elif b and not open_ids[aid]:
             db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
             open_ids[aid] = True
+        d = describe(a)
+        if siren_desc.get(aid) != d:
+            db.execute("UPDATE alerts SET notes=? WHERE api_id=?", (d, aid))
+            siren_desc[aid] = d
 
     for aid in [i for i in open_ids if i not in current]:
         db.execute("UPDATE alerts SET ended_at=? WHERE api_id=?", (now_iso(), aid))
         del open_ids[aid]
+        siren_desc.pop(aid, None)
     db.commit()
 
     is_active = bool(open_ids)
@@ -192,10 +242,12 @@ def process(mine: list[dict]):
         state["since"] = None
     state.update(active=is_active, ballistic=is_bal)
 
+    labels = sorted({l for a in mine for l in threat_labels(a)})
+    suffix = f" ({', '.join(labels)})" if labels else ""
     if is_bal and not was_ballistic:
         return f"🚀 БАЛІСТИЧНА ЗАГРОЗА — {CITY_NAME}! Негайно в укриття!"
     if is_active and not was_active:
-        return f"🚨 Повітряна тривога — {CITY_NAME}! Прямуйте в укриття."
+        return f"🚨 Повітряна тривога — {CITY_NAME}{suffix}! Прямуйте в укриття."
     if was_active and not is_active:
         return f"✅ Відбій тривоги — {CITY_NAME}."
     return None
@@ -314,7 +366,8 @@ async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             label = TYPE_LABELS.get(r["alert_type"], "Інша загроза")
             note = f" — {r['notes'][:80]}" if r.get("notes") else ""
             return f"⚠️ {fmt(r['started_at'])} → {end} {label} ({r['location']}){note}"
-        return f"{'🚀' if r['ballistic'] else '🚨'} {fmt(r['started_at'])} → {end}"
+        note = f" — {r['notes']}" if r.get("notes") else ""
+        return f"{'🚀' if r['ballistic'] else '🚨'} {fmt(r['started_at'])} → {end}{note}"
 
     lines = [line(r) for r in rows]
     await update.message.reply_text("Останні тривоги:\n" + "\n".join(lines))
