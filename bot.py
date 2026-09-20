@@ -46,6 +46,9 @@ SIREN_FILE = env("SIREN_FILE", "alarm.mp3")  # файл сирени в репо
 # OTHER_SCOPE: "oblast" (уся область, за замовч.) або "city" (лише Кам'янське)
 OTHER_SCOPE = env("OTHER_SCOPE", "city").lower()
 OTHER_NOTIFY = env("OTHER_NOTIFY", "0") == "1"  # тихі повідомлення в Telegram
+# Серія повідомлень при балістиці: скільки разів і з яким інтервалом (секунди)
+BALLISTIC_REPEAT = max(1, int(env("BALLISTIC_REPEAT", "15")))
+BALLISTIC_INTERVAL = max(1.0, float(env("BALLISTIC_INTERVAL", "1")))
 TEST_KEY = env("TEST_KEY")  # пароль для /api/test (без нього тест вимкнений)
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
@@ -151,9 +154,12 @@ def describe(a: dict) -> str:
 
 
 # ---------- Стан ----------
+# Тести, що не встигли закритись через перезапуск, закриваємо
+db.execute("UPDATE alerts SET ended_at=? WHERE category='test' AND ended_at IS NULL", (now_iso(),))
+db.commit()
 # Залишаємо в журналі лише записи по Кам'янському (чистимо старі чужі записи)
 if OTHER_SCOPE == "city":
-    for _r in db.execute("SELECT api_id, location FROM alerts").fetchall():
+    for _r in db.execute("SELECT api_id, location FROM alerts WHERE COALESCE(category,'siren')!='test'").fetchall():
         if norm(LOCATION_MATCH) not in norm(_r["location"]):
             db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
     db.commit()
@@ -178,7 +184,19 @@ other_open: dict[int, str] = {
 if open_ids:
     state.update(active=True, ballistic=any(open_ids.values()))
 tg_app: Application | None = None
-test = {"mode": None, "until": 0.0, "since": None}
+test = {"mode": None, "until": 0.0, "since": None, "id": None}
+
+
+def close_test():
+    """Закриває тестову тривогу в журналі (час кінця = вимкнення або кінець таймера)."""
+    if test["id"] is not None:
+        end = datetime.fromtimestamp(min(time.time(), test["until"]), timezone.utc)
+        db.execute(
+            "UPDATE alerts SET ended_at=? WHERE api_id=?",
+            (end.isoformat(timespec="seconds"), test["id"]),
+        )
+        db.commit()
+    test.update(mode=None, id=None)
 
 
 def subscribers():
@@ -196,6 +214,28 @@ async def broadcast(text: str, silent: bool = False):
             if "forbidden" in str(e).lower() or "chat not found" in str(e).lower():
                 db.execute("DELETE FROM subscribers WHERE chat_id=?", (chat_id,))
                 db.commit()
+
+
+bg_tasks: set = set()
+
+
+async def repeat_broadcast(text: str, still_active):
+    """Шле повідомлення BALLISTIC_REPEAT разів із паузою, поки загроза триває."""
+    for i in range(BALLISTIC_REPEAT):
+        if i and not still_active():
+            break
+        await broadcast(text)
+        if i < BALLISTIC_REPEAT - 1:
+            await asyncio.sleep(BALLISTIC_INTERVAL)
+
+
+def send_alert_message(text: str, ballistic: bool, still_active):
+    if ballistic and BALLISTIC_REPEAT > 1:
+        task = asyncio.create_task(repeat_broadcast(text, still_active))
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        return None
+    return broadcast(text)
 
 
 def process(mine: list[dict]):
@@ -278,6 +318,8 @@ def process_other(others: list[dict]) -> list[dict]:
 
 async def poller(session: ClientSession):
     while True:
+        if test["mode"] and time.time() >= test["until"]:
+            close_test()
         try:
             if not ALERTS_TOKEN:
                 raise RuntimeError("ALERTS_TOKEN не задано у змінних Railway")
@@ -293,7 +335,9 @@ async def poller(session: ClientSession):
             new_other = process_other([a for a in alerts if is_other(a)])
             state.update(updated=now_iso(), error=None)
             if msg:
-                await broadcast(msg)
+                coro = send_alert_message(msg, msg.startswith("🚀"), lambda: state["ballistic"])
+                if coro:
+                    await coro
             if OTHER_NOTIFY:
                 for a in new_other:
                     label = TYPE_LABELS.get(a.get("alert_type"), "Інша загроза")
@@ -350,7 +394,10 @@ def get_log(limit=50, other_limit=30):
         "SELECT * FROM alerts WHERE category='other' ORDER BY started_at DESC LIMIT ?",
         (other_limit,),
     ).fetchall()
-    rows = [dict(r) for r in siren] + [dict(r) for r in other]
+    tests = db.execute(
+        "SELECT * FROM alerts WHERE category='test' ORDER BY started_at DESC LIMIT 20"
+    ).fetchall()
+    rows = [dict(r) for r in siren] + [dict(r) for r in other] + [dict(r) for r in tests]
     rows.sort(key=lambda r: r["started_at"], reverse=True)
     return rows
 
@@ -362,6 +409,8 @@ async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     def line(r):
         end = fmt(r["ended_at"]) if r["ended_at"] else "триває"
+        if r.get("category") == "test":
+            return f"🧪 {fmt(r['started_at'])} → {end} {r.get('notes') or 'ТЕСТ'}"
         if r.get("category") == "other":
             label = TYPE_LABELS.get(r["alert_type"], "Інша загроза")
             note = f" — {r['notes'][:80]}" if r.get("notes") else ""
@@ -397,7 +446,8 @@ async def h_status(_):
                 "city": CITY_NAME,
             }
         )
-    test["mode"] = None
+    if test["mode"]:
+        close_test()
     return web.json_response({**state, "test": False, "city": CITY_NAME})
 
 
@@ -410,7 +460,7 @@ async def h_test(request: web.Request):
         return web.json_response({"error": "Невірний key"}, status=403)
     kind = q.get("type", "alert")
     if kind == "off":
-        test["mode"] = None
+        close_test()
         return web.json_response({"ok": True, "test": "вимкнено"})
     if kind not in ("alert", "ballistic"):
         return web.json_response({"error": "type: alert | ballistic | off"}, status=400)
@@ -418,10 +468,27 @@ async def h_test(request: web.Request):
         seconds = min(600, max(10, int(q.get("seconds", "60"))))
     except ValueError:
         seconds = 60
-    test.update(mode=kind, until=time.time() + seconds, since=now_iso())
+    close_test()  # закриваємо попередній тест, якщо ще йде
+    label = "балістична загроза" if kind == "ballistic" else "повітряна тривога"
+    tid = -int(time.time() * 1000)  # від'ємний id, щоб не перетинатись з API
+    since = now_iso()
+    db.execute(
+        "INSERT INTO alerts(api_id, started_at, alert_type, ballistic, location, notes, category)"
+        " VALUES(?,?,?,?,?,?,'test')",
+        (tid, since, "air_raid", int(kind == "ballistic"), f"м. {CITY_NAME} (тест)",
+         f"ТЕСТ: {label}" + (" + Telegram" if q.get("notify") == "1" else "")),
+    )
+    db.commit()
+    test.update(mode=kind, until=time.time() + seconds, since=since, id=tid)
     if q.get("notify") == "1":
-        label = "балістична загроза" if kind == "ballistic" else "повітряна тривога"
-        await broadcast(f"🧪 ТЕСТ ({label}) — {CITY_NAME}. Це перевірка, реальної загрози немає.")
+        text = f"🧪 ТЕСТ ({label}) — {CITY_NAME}. Це перевірка, реальної загрози немає."
+        coro = send_alert_message(
+            text,
+            kind == "ballistic",
+            lambda: test["mode"] == "ballistic" and time.time() < test["until"],
+        )
+        if coro:
+            await coro
     return web.json_response({"ok": True, "test": kind, "seconds": seconds})
 
 
