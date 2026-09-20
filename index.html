@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>Моніторинг тривог — Кам'янське</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
+        .status-box { padding: 20px; border-radius: 10px; font-size: 24px; font-weight: bold; margin-bottom: 20px; }
+        .normal { background: #2e7d32; }
+        .alert-ballistic { background: #c62828; animation: blink 1s infinite; }
+        .alert-uav { background: #ef6c00; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .log-container { max-width: 600px; margin: 0 auto; background: #1e1e1e; padding: 15px; border-radius: 8px; text-align: left; }
+        .log-item { border-bottom: 1px solid #333; padding: 8px 0; font-size: 14px; }
+        .sound-btn { background: #ff5252; color: #fff; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>Моніторинг тривог: м. Кам'янське</h1>
+
+    <!-- Кнопка для розблокування звуку браузером -->
+    <button class="sound-btn" onclick="unlockAudio()">Увімкнути звук сирени</button>
+
+    <div id="statusBox" class="status-box normal">Статус: Спокійно</div>
+
+    <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/emergency_alarm.ogg" preload="auto" loop></audio>
+
+    <div class="log-container">
+        <h3>Лог подій (Кам'янське та регіон):</h3>
+        <div id="logList">
+            <div class="log-item">Система запущена. Очікування даних...</div>
+        </div>
+    </div>
+
+    <script>
+        const statusBox = document.getElementById('statusBox');
+        const alarmSound = document.getElementById('alarmSound');
+        const logList = document.getElementById('logList');
+        let audioUnlocked = false;
+
+        function unlockAudio() {
+            alarmSound.play().then(() => {
+                alarmSound.pause();
+                alarmSound.currentTime = 0;
+                audioUnlocked = true;
+                alert("Звук сирени активовано!");
+            }).catch(e => console.log(e));
+        }
+
+        function addLog(message, type) {
+            const timeStr = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = 'log-item';
+            div.style.color = type === 'ballistic' ? '#ff5252' : (type === 'uav' ? '#ffa726' : '#fff');
+            div.innerText = `[${timeStr}] ${message}`;
+            logList.prepend(div);
+        }
+
+        // Функція для зміни статусу (можна зв'язати з API або бекендом)
+        function setAlertStatus(type) {
+            if (type === 'ballistic') {
+                statusBox.className = 'status-box alert-ballistic';
+                statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
+                if (audioUnlocked) alarmSound.play();
+                addLog("Зафіксовано балістичну загрозу!", "ballistic");
+            } else {
+                statusBox.className = 'status-box normal';
+                statusBox.innerText = 'Статус: Спокійно';
+                alarmSound.pause();
+                alarmSound.currentTime = 0;
+                addLog("Відбій тривоги.", "normal");
+            }
+        }
+    </script>
+</body>
+</html>
