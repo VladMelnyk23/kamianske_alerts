@@ -12,21 +12,24 @@
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         .log-container { max-width: 600px; margin: 0 auto; background: #1e1e1e; padding: 15px; border-radius: 8px; text-align: left; }
         .log-item { border-bottom: 1px solid #333; padding: 8px 0; font-size: 14px; }
-        .sound-btn { background: #ff5252; color: #fff; border: none; padding: 12px 24px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; font-weight: bold; transition: 0.3s; }
-        .sound-btn:hover { opacity: 0.9; }
+        .btn-container { margin-bottom: 20px; }
+        .sound-btn { background: #ff5252; color: #fff; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; margin: 5px; transition: 0.3s; }
+        .sound-btn.active { background: #2e7d32; }
+        .mute-btn { background: #d32f2f; color: #fff; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; margin: 5px; display: none; }
     </style>
 </head>
 <body>
 
     <h1>Моніторинг тривог: м. Кам'янське</h1>
     
-    <!-- Покращена кнопка розблокування звуку -->
-    <button class="sound-btn" onclick="unlockAudio()">🔊 Увімкнути звук сирени</button>
+    <div class="btn-container">
+        <button id="enableBtn" class="sound-btn" onclick="unlockAudio()">🔊 Дозволити звук сирени</button>
+        <button id="muteBtn" class="mute-btn" onclick="toggleMute()">🔕 Вимкнути сирену зараз</button>
+    </div>
     
     <div id="statusBox" class="status-box normal">Статус: Завантаження...</div>
 
-    <!-- Використовуємо надійне посилання на аудіосирену -->
-    <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg" preload="auto" loop></audio>
+    <audio id="alarmSound" src="alarm.mp3" preload="auto" loop></audio>
 
     <div class="log-container">
         <h3>Лог подій (останні до 10):</h3>
@@ -39,22 +42,34 @@
         const statusBox = document.getElementById('statusBox');
         const alarmSound = document.getElementById('alarmSound');
         const logList = document.getElementById('logList');
-        let audioUnlocked = false;
+        const enableBtn = document.getElementById('enableBtn');
+        const muteBtn = document.getElementById('muteBtn');
+
+        let audioAllowed = false;
+        let soundManuallyMuted = false;
 
         function unlockAudio() {
-            // Примусово запускаємо та одразу ставимо на паузу аудіо для розблокування політики браузера
             alarmSound.play().then(() => {
                 alarmSound.pause();
                 alarmSound.currentTime = 0;
-                audioUnlocked = true;
+                audioAllowed = true;
+                soundManuallyMuted = false;
                 
-                let btn = document.querySelector('.sound-btn');
-                btn.style.backgroundColor = '#2e7d32';
-                btn.innerText = '✅ Звук сирени активовано';
+                enableBtn.className = 'sound-btn active';
+                enableBtn.innerText = '✅ Звук активовано';
+                muteBtn.style.display = 'inline-block';
             }).catch(e => {
                 console.log("Помилка аудіо:", e);
-                alert("Браузер заблокував звук. Спробуйте ще раз.");
+                alert("Не вдалося знайти файл alarm.mp3 або браузер заблокував звук.");
             });
+        }
+
+        function toggleMute() {
+            soundManuallyMuted = true;
+            alarmSound.pause();
+            alarmSound.currentTime = 0;
+            muteBtn.style.backgroundColor = '#555';
+            muteBtn.innerText = '🔇 Сирену вимкнено (до наступної тривоги)';
         }
 
         async function fetchStatus() {
@@ -62,33 +77,48 @@
                 let response = await fetch('/status');
                 let data = await response.json();
 
-                // Оновлюємо статус на екрані та керуємо звуком
                 if (data.current_status === 'ballistic') {
                     statusBox.className = 'status-box alert-ballistic';
                     statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
-                    if (audioUnlocked && alarmSound.paused) {
-                        alarmSound.play().catch(err => console.log("Помилка відтворення сирени:", err));
+                    
+                    if (audioAllowed && !soundManuallyMuted && alarmSound.paused) {
+                        alarmSound.play().catch(err => console.log("Помилка відтворення:", err));
                     }
                 } else if (data.current_status === 'uav') {
                     statusBox.className = 'status-box alert-uav';
                     statusBox.innerText = '⚠️ ЗАГРОЗА БПЛА У РЕГІОНІ';
-                    if (audioUnlocked && alarmSound.paused) {
-                        alarmSound.play().catch(err => console.log("Помилка відтворення сирени:", err));
+                    if (audioAllowed && !soundManuallyMuted && alarmSound.paused) {
+                        alarmSound.play().catch(err => console.log("Помилка відтворення:", err));
                     }
                 } else {
                     statusBox.className = 'status-box normal';
                     statusBox.innerText = 'Статус: Спокійно';
+                    
+                    soundManuallyMuted = false;
+                    muteBtn.style.backgroundColor = '#d32f2f';
+                    muteBtn.innerText = '🔕 Вимкнути сирену зараз';
+
                     alarmSound.pause();
                     alarmSound.currentTime = 0;
                 }
 
-                // Оновлюємо лог подій
+                // Оновлення логу подій з кольоровим виділенням балістики
                 logList.innerHTML = '';
                 if (data.logs && data.logs.length > 0) {
                     data.logs.forEach(item => {
                         let div = document.createElement('div');
                         div.className = 'log-item';
-                        div.style.color = item.type === 'ballistic' ? '#ff5252' : (item.type === 'uav' ? '#ffa726' : '#fff');
+                        
+                        // Балістика виділяється яскраво-червоним, БПЛА — помаранчевим, відбій — зеленим/білим
+                        if (item.type === 'ballistic') {
+                            div.style.color = '#ff5252';
+                            div.style.fontWeight = 'bold';
+                        } else if (item.type === 'uav') {
+                            div.style.color = '#ffa726';
+                        } else {
+                            div.style.color = '#81c784';
+                        }
+
                         div.innerText = `[${item.time}] ${item.text}`;
                         logList.appendChild(div);
                     });
@@ -97,11 +127,10 @@
                 }
 
             } catch (e) {
-                console.log("Помилка з'єднання з сервером:", e);
+                console.log("Помилка з'єднання:", e);
             }
         }
 
-        // Опитуємо наш сервер на Railway кожні 5 секунд
         setInterval(fetchStatus, 5000);
         fetchStatus();
     </script>
