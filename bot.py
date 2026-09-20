@@ -52,20 +52,26 @@ def alert_checker_loop():
             response = requests.get(URL, headers=HEADERS, timeout=10)
             if response.status_code == 200:
                 data = response.json()
+                
+                # --- ДЕБАГ У КОНСОЛЬ RAILWAY ---
+                print("Отримано відповідь від API alerts.in.ua:", data)
+                
                 is_ballistic = False
                 is_uav = False
                 alert_details = "Дніпровський район"
                 
-                # Виводимо в консоль Railway список активних тривог для зручності дебагу
                 active_alerts = data.get("alerts", [])
                 
                 for alert in active_alerts:
-                    # Перевіряємо всі можливі ключі, куди API може записувати назву
+                    # Перевіряємо всі можливі варіанти полів (включно з числовими або строковими ID)
                     loc_title = str(alert.get("location_title", "")).lower()
-                    loc_type = str(alert.get("location_type", "")).lower()
+                    loc_id = str(alert.get("location_uid", "")).lower()
+                    region_id = str(alert.get("region_id", "")).lower()
                     
-                    # Шукаємо збіги за «дніпровськ» або «кам'ян»
-                    if "дніпровськ" in loc_title or "кам'ян" in loc_title:
+                    print(f"Перевірка локації -> title: {loc_title}, uid: {loc_id}, region_id: {region_id}, type: {alert.get('type')}")
+                    
+                    # Шукаємо збіги за назвою або будь-яким посиланням на Дніпровський район / Дніпропетровщину / Кам'янське
+                    if "дніпровсь" in loc_title or "кам'ян" in loc_title or "дніпропетровсь" in loc_title or "9" in region_id:
                         atype = alert.get("type")
                         notes = alert.get("notes") or alert.get("description") or loc_title
                         if notes:
@@ -98,6 +104,8 @@ def alert_checker_loop():
                     current_alert_status = "normal"
                     last_ballistic_state = False
                     last_uav_state = False
+            else:
+                print(f"Помилка статус коду API: {response.status_code}, текст: {response.text}")
         except Exception as e:
             print(f"Помилка опитування API: {e}")
         
