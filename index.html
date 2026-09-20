@@ -27,6 +27,7 @@
   .tag { padding:2px 8px; border-radius:6px; font-size:.8rem; background:var(--warn); color:#000; }
   .tag.b { background:var(--bad); color:#fff; }
   .tag.o { background:#6e7681; color:#fff; }
+  .tag.t { background:#1f6feb; color:#fff; }
   tr.other td { color:var(--muted); }
   label.muted { display:block; margin:0 0 10px; }
   .wrap { overflow-x:auto; }
@@ -136,13 +137,15 @@ async function loadLog() {
     if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted">Записів ще немає</td></tr>'; return; }
     for (const r of rows) {
       const other = r.category === 'other';
+      const isTest = r.category === 'test';
       const tr = document.createElement('tr');
-      if (other) tr.className = 'other';
+      if (other || isTest) tr.className = 'other';
       const cells = [fmt(r.started_at), r.ended_at ? fmt(r.ended_at) : 'триває', dur(r.started_at, r.ended_at)];
       for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
       const td = document.createElement('td');
       const tag = document.createElement('span');
-      if (other) { tag.className = 'tag o'; tag.textContent = TYPES[r.alert_type] || 'Інша загроза'; }
+      if (isTest) { tag.className = 'tag t'; tag.textContent = r.ballistic ? 'Тест (балістика)' : 'Тест'; }
+      else if (other) { tag.className = 'tag o'; tag.textContent = TYPES[r.alert_type] || 'Інша загроза'; }
       else { tag.className = 'tag' + (r.ballistic ? ' b' : ''); tag.textContent = r.ballistic ? 'Балістика' : 'Повітряна'; }
       td.appendChild(tag); tr.appendChild(td);
       const cm = document.createElement('td');
