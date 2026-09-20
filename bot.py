@@ -3,7 +3,7 @@ import requests
 import asyncio
 import threading
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder='.')
@@ -11,20 +11,20 @@ app = Flask(__name__, static_folder='.')
 ALERTS_API_KEY = os.getenv("ALERTS_API_KEY", "")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
-TARGET_DISTRICT = "Кам'янськ"
 URL = "https://api.alerts.in.ua/v1/iot/active_air_raids.json"
 HEADERS = {"Authorization": f"Bearer {ALERTS_API_KEY}"}
 
-current_alert_status = "normal"  # normal, ballistic, uav
+current_alert_status = "normal"
 logs_history = []
 
 def add_log(text, alert_type):
     global logs_history
-    time_str = datetime.now().strftime("%H:%M:%S")
-    # Зберігаємо унікальні події в лозі
+    kiev_time = datetime.now(timezone(timedelta(hours=3)))
+    time_str = kiev_time.strftime("%H:%M:%S")
+    
     if not logs_history or logs_history[0]["text"] != text:
         logs_history.insert(0, {"time": time_str, "text": text, "type": alert_type})
-        if len(logs_history) > 10:
+        if len(logs_history) > 100:
             logs_history.pop()
 
 def send_telegram_message(text):
@@ -37,8 +37,6 @@ def send_telegram_message(text):
         print(f"Помилка ТГ: {e}")
 
 async def spam_ballistic_alarm(details):
-    """Екстрений спам виключно для балістики з додатковими деталями загрози"""
-    print("Запуск екстреного спаму повідомлень про балістику...")
     msg = f"🚨 **УВАГА! БАЛІСТИКА НА КАМ'ЯНСЬКЕ!** 🚨\n{details}"
     for i in range(15):
         send_telegram_message(f"{msg} ({i+1}/15)")
@@ -60,13 +58,13 @@ def alert_checker_loop():
                 
                 for alert in data.get("alerts", []):
                     loc = str(alert.get("location_title", "")).lower()
-                    if TARGET_DISTRICT.lower() in loc or "дніпропетровсь" in loc:
+                    
+                    # Гнучкий пошук: шукаємо частину слова "кам'ян" або район/область
+                    if "кам'ян" in loc or "дніпровсь" in loc or "дніпропетровсь" in loc:
                         atype = alert.get("type")
-                        
-                        # Збираємо примітки/деталі, якщо вони є в API
                         notes = alert.get("notes") or alert.get("description") or alert.get("location_title")
                         if notes:
-                            alert_details = f"📍 Локація/Примітка: {notes}"
+                            alert_details = f"📍 Локація: {notes}"
 
                         if atype == "ballistic":
                             is_ballistic = True
@@ -115,15 +113,14 @@ def status():
         "logs": logs_history
     })
 
-# Тестові маршрути залишаються для зручності перевірки
 @app.route('/test-ballistic')
 def test_ballistic():
     global current_alert_status
     current_alert_status = "ballistic"
-    details = "📍 Примітка: Тестовий запуск балістики з напрямку півдня"
+    details = "📍 Примітка: Тестовий запуск балістики"
     add_log(f"🚨 ТЕСТОВА Балістична загроза! {details}", "ballistic")
     asyncio.run(spam_ballistic_alarm(details))
-    return "Тестова балістика з примітками активована!"
+    return "Тестова балістика активована!"
 
 @app.route('/test-normal')
 def test_normal():
