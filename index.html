@@ -38,6 +38,8 @@
     <div class="sub" id="sub"></div>
   </div>
   <button id="soundBtn">🔇 Увімкнути звук</button>
+  <button id="testBtn">▶ Перевірити звук</button>
+  <div class="muted" id="soundMsg"></div>
   <div class="muted" id="updated"></div>
 
   <h2>Останні 50 тривог</h2>
@@ -58,29 +60,49 @@ const dur = (a, b) => {
 };
 
 const audio = new Audio('/alarm.mp3');
-let soundOn = false, prev = 'ok';
+audio.preload = 'auto';
+let soundOn = false, cur = 'ok', playedFor = null;
 const btn = document.getElementById('soundBtn');
+const testBtn = document.getElementById('testBtn');
+const msg = document.getElementById('soundMsg');
+
+audio.addEventListener('error', () => {
+  msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
+});
+
+function tryPlay(loop) {
+  audio.loop = loop;
+  audio.currentTime = 0;
+  const p = audio.play();
+  if (p) p.then(() => { msg.textContent = ''; })
+          .catch(e => { msg.textContent = 'Відтворення не вдалося: ' + e.name + ' ' + e.message; });
+}
+
+function syncSound() {
+  if (cur === 'ok') { playedFor = null; audio.pause(); return; }
+  if (!soundOn) { audio.pause(); return; }
+  if (playedFor !== cur) { playedFor = cur; tryPlay(cur === 'ballistic'); }
+}
+
 btn.onclick = () => {
   soundOn = !soundOn;
   btn.classList.toggle('on', soundOn);
   btn.textContent = soundOn ? '🔊 Звук увімкнено' : '🔇 Увімкнути звук';
-  if (soundOn) { audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {}); }
-  else audio.pause();
+  playedFor = null;
+  if (soundOn) syncSound(); else audio.pause();
 };
 
-function play(loop) {
-  if (!soundOn) return;
-  audio.loop = loop;
-  audio.currentTime = 0;
-  audio.play().catch(() => {});
-}
+testBtn.onclick = () => {
+  tryPlay(false);
+  setTimeout(() => { if (cur === 'ok' || !soundOn) audio.pause(); }, 4000);
+};
 
 async function loadStatus() {
   const box = document.getElementById('status'), big = document.getElementById('big'), sub = document.getElementById('sub');
   try {
     const s = await (await fetch('/api/status')).json();
     document.getElementById('city').textContent = s.city;
-    let cur = 'ok';
+    cur = 'ok';
     if (s.ballistic) cur = 'ballistic'; else if (s.active) cur = 'alert';
     box.className = 'status ' + (cur === 'ok' ? '' : cur);
     if (cur === 'ballistic') { big.textContent = '🚀 БАЛІСТИЧНА ЗАГРОЗА'; sub.textContent = 'Негайно в укриття! З ' + fmt(s.since); }
@@ -88,12 +110,7 @@ async function loadStatus() {
     else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
     document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
 
-    if (cur !== prev) {
-      if (cur === 'ballistic') play(true);
-      else if (cur === 'alert') play(false);
-      else audio.pause();
-      prev = cur;
-    }
+    syncSound();
   } catch (e) {
     box.className = 'status error';
     big.textContent = 'Немає зв\'язку із сервером';
