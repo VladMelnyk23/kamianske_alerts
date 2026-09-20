@@ -2,39 +2,206 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Моніторинг тривог — Кам'янське</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
-        .status-box { padding: 20px; border-radius: 10px; font-size: 24px; font-weight: bold; margin-bottom: 20px; }
-        .normal { background: #2e7d32; }
-        .alert-ballistic { background: #c62828; animation: blink 1s infinite; }
-        .alert-uav { background: #ef6c00; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        .log-container { max-width: 600px; margin: 0 auto; background: #1e1e1e; padding: 15px; border-radius: 8px; text-align: left; }
-        .log-item { border-bottom: 1px solid #333; padding: 8px 0; font-size: 14px; }
-        .btn-container { margin-bottom: 20px; }
-        .sound-btn { background: #ff5252; color: #fff; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; margin: 5px; transition: 0.3s; }
-        .sound-btn.active { background: #2e7d32; }
-        .mute-btn { background: #d32f2f; color: #fff; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; margin: 5px; display: none; }
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --success-color: #10b981;
+            --ballistic-color: #ef4444;
+            --uav-color: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 550px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Шапка з автором */
+        .author-badge {
+            font-size: 13px;
+            color: var(--text-muted);
+            text-align: center;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 6px 12px;
+            border-radius: 20px;
+            align-self: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .author-badge span {
+            color: var(--text-color);
+            font-weight: 600;
+        }
+
+        header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 4px;
+        }
+
+        /* Блок статусу */
+        .status-box {
+            padding: 24px 16px;
+            border-radius: 16px;
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+        .normal {
+            background: linear-gradient(135deg, #065f46, #047857);
+            color: #ecfdf5;
+        }
+        .alert-ballistic {
+            background: linear-gradient(135deg, #991b1b, #dc2626);
+            color: #fef2f2;
+            animation: pulse-red 1s infinite alternate;
+        }
+        .alert-uav {
+            background: linear-gradient(135deg, #92400e, #d97706);
+            color: #fffbeb;
+            animation: pulse-orange 1.5s infinite alternate;
+        }
+
+        @keyframes pulse-red {
+            0% { transform: scale(1); box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+            100% { transform: scale(1.02); box-shadow: 0 0 25px rgba(239, 68, 68, 0.7); }
+        }
+        @keyframes pulse-orange {
+            0% { transform: scale(1); box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+            100% { transform: scale(1.02); box-shadow: 0 0 25px rgba(245, 158, 11, 0.7); }
+        }
+
+        /* Кнопки керування звуком */
+        .btn-container {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+        .action-btn {
+            flex: 1;
+            padding: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .action-btn:active {
+            transform: scale(0.98);
+        }
+        .sound-btn {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .sound-btn.active {
+            background-color: var(--success-color);
+        }
+        .mute-btn {
+            background-color: #ef4444;
+            color: white;
+            display: none;
+        }
+
+        /* Лог подій */
+        .log-container {
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .log-header {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-muted);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+        #logList {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .log-item {
+            padding: 10px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Мобільна адаптація */
+        @media (max-width: 480px) {
+            body { padding: 10px; }
+            header h1 { font-size: 19px; }
+            .status-box { font-size: 18px; padding: 20px 12px; }
+            .btn-container { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
 
-    <h1>Моніторинг тривог: м. Кам'янське</h1>
-    
-    <div class="btn-container">
-        <button id="enableBtn" class="sound-btn" onclick="unlockAudio()">🔊 Дозволити звук сирени</button>
-        <button id="muteBtn" class="mute-btn" onclick="toggleMute()">🔕 Вимкнути сирену зараз</button>
-    </div>
-    
-    <div id="statusBox" class="status-box normal">Статус: Завантаження...</div>
+    <div class="container">
+        <!-- Інформація про автора -->
+        <div class="author-badge">
+            Розробник сервісу: <span>Vladyslav Melnyk</span>
+        </div>
 
-    <audio id="alarmSound" src="alarm.mp3" preload="auto" loop></audio>
+        <header>
+            <h1>Моніторинг тривог</h1>
+            <p style="text-align: center; color: var(--text-muted); font-size: 14px;">м. Кам'янське та регіон</p>
+        </header>
+        
+        <div class="btn-container">
+            <button id="enableBtn" class="action-btn sound-btn" onclick="unlockAudio()">🔊 Дозволити звук</button>
+            <button id="muteBtn" class="action-btn mute-btn" onclick="toggleMute()">🔕 Вимкнути сирену</button>
+        </div>
+        
+        <div id="statusBox" class="status-box normal">Статус: Завантаження...</div>
 
-    <div class="log-container">
-        <h3>Лог подій (останні до 10):</h3>
-        <div id="logList">
-            <div class="log-item">Підключення до сервера...</div>
+        <audio id="alarmSound" src="alarm.mp3" preload="auto" loop></audio>
+
+        <div class="log-container">
+            <div class="log-header">Лог подій (останні до 10):</div>
+            <div id="logList">
+                <div class="log-item" style="color: var(--text-muted);">Підключення до серверну...</div>
+            </div>
         </div>
     </div>
 
@@ -55,12 +222,12 @@
                 audioAllowed = true;
                 soundManuallyMuted = false;
                 
-                enableBtn.className = 'sound-btn active';
+                enableBtn.classList.add('active');
                 enableBtn.innerText = '✅ Звук активовано';
-                muteBtn.style.display = 'inline-block';
+                muteBtn.style.display = 'flex';
             }).catch(e => {
                 console.log("Помилка аудіо:", e);
-                alert("Не вдалося знайти файл alarm.mp3 або браузер заблокував звук.");
+                alert("Браузер заблокував звук або файл alarm.mp3 не знайдено.");
             });
         }
 
@@ -68,8 +235,8 @@
             soundManuallyMuted = true;
             alarmSound.pause();
             alarmSound.currentTime = 0;
-            muteBtn.style.backgroundColor = '#555';
-            muteBtn.innerText = '🔇 Сирену вимкнено (до наступної тривоги)';
+            muteBtn.style.backgroundColor = '#475569';
+            muteBtn.innerText = '🔇 Сирену вимкнено';
         }
 
         async function fetchStatus() {
@@ -95,35 +262,32 @@
                     statusBox.innerText = 'Статус: Спокійно';
                     
                     soundManuallyMuted = false;
-                    muteBtn.style.backgroundColor = '#d32f2f';
-                    muteBtn.innerText = '🔕 Вимкнути сирену зараз';
+                    muteBtn.style.backgroundColor = '#ef4444';
+                    muteBtn.innerText = '🔕 Вимкнути сирену';
 
                     alarmSound.pause();
                     alarmSound.currentTime = 0;
                 }
 
-                // Оновлення логу подій з кольоровим виділенням балістики
+                // Оновлення логу подій
                 logList.innerHTML = '';
                 if (data.logs && data.logs.length > 0) {
                     data.logs.forEach(item => {
                         let div = document.createElement('div');
                         div.className = 'log-item';
                         
-                        // Балістика виділяється яскраво-червоним, БПЛА — помаранчевим, відбій — зеленим/білим
+                        let colorStyle = 'color: var(--success-color);';
                         if (item.type === 'ballistic') {
-                            div.style.color = '#ff5252';
-                            div.style.fontWeight = 'bold';
+                            colorStyle = 'color: var(--ballistic-color); font-weight: bold;';
                         } else if (item.type === 'uav') {
-                            div.style.color = '#ffa726';
-                        } else {
-                            div.style.color = '#81c784';
+                            colorStyle = 'color: var(--uav-color); font-weight: bold;';
                         }
 
-                        div.innerText = `[${item.time}] ${item.text}`;
+                        div.innerHTML = `<span>${item.text}</span><span style="font-size: 11px; opacity: 0.7; ${colorStyle}">${item.time}</span>`;
                         logList.appendChild(div);
                     });
                 } else {
-                    logList.innerHTML = '<div class="log-item">Подій поки немає. Спокійно.</div>';
+                    logList.innerHTML = '<div class="log-item" style="color: var(--text-muted);">Подій поки немає. Спокійно.</div>';
                 }
 
             } catch (e) {
