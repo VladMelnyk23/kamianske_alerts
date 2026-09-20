@@ -26,6 +26,9 @@
   tr:last-child td { border-bottom:0; }
   .tag { padding:2px 8px; border-radius:6px; font-size:.8rem; background:var(--warn); color:#000; }
   .tag.b { background:var(--bad); color:#fff; }
+  .tag.o { background:#6e7681; color:#fff; }
+  tr.other td { color:var(--muted); }
+  label.muted { display:block; margin:0 0 10px; }
   .wrap { overflow-x:auto; }
   .muted { color:var(--muted); font-size:.85rem; }
 </style>
@@ -42,11 +45,12 @@
   <div class="muted" id="soundMsg"></div>
   <div class="muted" id="updated"></div>
 
-  <h2>Останні 50 тривог</h2>
+  <h2>Журнал тривог і загроз</h2>
+  <label class="muted"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози (без сирени)</label>
   <div class="wrap">
     <table>
-      <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th></tr></thead>
-      <tbody id="log"><tr><td colspan="4" class="muted">Завантаження…</td></tr></tbody>
+      <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
+      <tbody id="log"><tr><td colspan="5" class="muted">Завантаження…</td></tr></tbody>
     </table>
   </div>
 </main>
@@ -108,6 +112,7 @@ async function loadStatus() {
     if (cur === 'ballistic') { big.textContent = '🚀 БАЛІСТИЧНА ЗАГРОЗА'; sub.textContent = 'Негайно в укриття! З ' + fmt(s.since); }
     else if (cur === 'alert') { big.textContent = '🚨 ПОВІТРЯНА ТРИВОГА'; sub.textContent = 'З ' + fmt(s.since); }
     else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
+    if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
     document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
 
     syncSound();
@@ -118,21 +123,31 @@ async function loadStatus() {
   }
 }
 
+let showOther = true;
+document.getElementById('otherToggle').onchange = e => { showOther = e.target.checked; loadLog(); };
+const TYPES = {air_raid:'Повітряна', chemical:'Хімічна', radiation:'Радіаційна', other:'Інша'};
+
 async function loadLog() {
   const tbody = document.getElementById('log');
   try {
-    const rows = await (await fetch('/api/log')).json();
+    let rows = await (await fetch('/api/log')).json();
+    rows = rows.filter(r => showOther || r.category !== 'other');
     tbody.innerHTML = '';
-    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted">Записів ще немає</td></tr>'; return; }
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted">Записів ще немає</td></tr>'; return; }
     for (const r of rows) {
+      const other = r.category === 'other';
       const tr = document.createElement('tr');
+      if (other) tr.className = 'other';
       const cells = [fmt(r.started_at), r.ended_at ? fmt(r.ended_at) : 'триває', dur(r.started_at, r.ended_at)];
       for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
       const td = document.createElement('td');
       const tag = document.createElement('span');
-      tag.className = 'tag' + (r.ballistic ? ' b' : '');
-      tag.textContent = r.ballistic ? 'Балістика' : 'Повітряна';
+      if (other) { tag.className = 'tag o'; tag.textContent = TYPES[r.alert_type] || 'Інша загроза'; }
+      else { tag.className = 'tag' + (r.ballistic ? ' b' : ''); tag.textContent = r.ballistic ? 'Балістика' : 'Повітряна'; }
       td.appendChild(tag); tr.appendChild(td);
+      const cm = document.createElement('td');
+      cm.textContent = other ? [r.location, r.notes].filter(Boolean).join(' — ') : (r.notes || '');
+      tr.appendChild(cm);
       tbody.appendChild(tr);
     }
   } catch (e) {}
