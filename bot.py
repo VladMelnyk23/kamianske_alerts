@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,6 +42,11 @@ OBLAST = env("OBLAST", "Дніпропетровська область")
 # Шматок назви локації в API. Апострофи нормалізуються (' ’ ʼ).
 LOCATION_MATCH = env("LOCATION_MATCH", "Кам'янськ")
 SIREN_FILE = env("SIREN_FILE", "alarm.mp3")  # файл сирени в репозиторії
+# Інші загрози (хімічна, радіаційна, інші) пишуться в журнал без сирени.
+# OTHER_SCOPE: "oblast" (уся область, за замовч.) або "city" (лише Кам'янське)
+OTHER_SCOPE = env("OTHER_SCOPE", "oblast").lower()
+OTHER_NOTIFY = env("OTHER_NOTIFY", "0") == "1"  # тихі повідомлення в Telegram
+TEST_KEY = env("TEST_KEY")  # пароль для /api/test (без нього тест вимкнений)
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 BASE = Path(__file__).parent
@@ -63,6 +69,11 @@ db.executescript(
     CREATE TABLE IF NOT EXISTS subscribers(chat_id INTEGER PRIMARY KEY);
     """
 )
+for _col in ("notes TEXT", "category TEXT DEFAULT 'siren'"):
+    try:
+        db.execute(f"ALTER TABLE alerts ADD COLUMN {_col}")
+    except sqlite3.OperationalError:
+        pass  # колонка вже існує
 db.commit()
 
 
@@ -85,27 +96,56 @@ def is_ballistic(a: dict) -> bool:
     return "ballistic" in text or "балістик" in text
 
 
+def is_siren(a: dict) -> bool:
+    """Тривога, що вмикає сирену: повітряна/балістика в Кам'янському."""
+    return is_mine(a) and (a.get("alert_type") == "air_raid" or is_ballistic(a))
+
+
+def is_other(a: dict) -> bool:
+    """Інша загроза (без сирени)."""
+    if is_siren(a):
+        return False
+    if OTHER_SCOPE == "city":
+        return is_mine(a)
+    return norm(OBLAST) == norm(a.get("location_oblast"))
+
+
+TYPE_LABELS = {
+    "air_raid": "Повітряна тривога",
+    "chemical": "Хімічна загроза",
+    "radiation": "Радіаційна загроза",
+    "other": "Інша загроза",
+}
+
+
 # ---------- Стан ----------
 state = {"active": False, "ballistic": False, "since": None, "updated": None, "error": None}
 open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
-    for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL")
+    for r in db.execute(
+        "SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL AND COALESCE(category,'siren')='siren'"
+    )
+}
+other_open: dict[int, str] = {
+    r["api_id"]: r["notes"] or ""
+    for r in db.execute("SELECT api_id, notes FROM alerts WHERE ended_at IS NULL AND category='other'")
 }
 if open_ids:
     state.update(active=True, ballistic=any(open_ids.values()))
 tg_app: Application | None = None
+test = {"mode": None, "until": 0.0, "since": None}
 
 
 def subscribers():
     return [r["chat_id"] for r in db.execute("SELECT chat_id FROM subscribers")]
 
 
-async def broadcast(text: str):
+async def broadcast(text: str, silent: bool = False):
     if not tg_app:
         return
     for chat_id in subscribers():
         try:
-            await tg_app.bot.send_message(chat_id, text)
+            await tg_app.bot.send_message(chat_id, text, disable_notification=silent)
         except Exception as e:  # заблокований бот тощо
             log.warning("send to %s failed: %s", chat_id, e)
             if "forbidden" in str(e).lower() or "chat not found" in str(e).lower():
@@ -123,9 +163,16 @@ def process(mine: list[dict]):
         b = is_ballistic(a)
         if aid not in open_ids:
             db.execute(
-                "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location)"
-                " VALUES(?,?,?,?,?)",
-                (aid, a.get("started_at") or now_iso(), a.get("alert_type"), int(b), a.get("location_title")),
+                "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location, notes, category)"
+                " VALUES(?,?,?,?,?,?,'siren')",
+                (
+                    aid,
+                    a.get("started_at") or now_iso(),
+                    a.get("alert_type"),
+                    int(b),
+                    a.get("location_title"),
+                    a.get("notes") or "",
+                ),
             )
             open_ids[aid] = b
         elif b and not open_ids[aid]:
@@ -154,6 +201,29 @@ def process(mine: list[dict]):
     return None
 
 
+def process_other(others: list[dict]) -> list[dict]:
+    """Пише інші загрози в журнал (без сирени). Повертає нові події."""
+    current = {a["id"]: a for a in others}
+    new = []
+    for aid, a in current.items():
+        notes = a.get("notes") or ""
+        if aid not in other_open:
+            db.execute(
+                "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location, notes, category)"
+                " VALUES(?,?,?,0,?,?,'other')",
+                (aid, a.get("started_at") or now_iso(), a.get("alert_type"), a.get("location_title"), notes),
+            )
+            new.append(a)
+        elif other_open[aid] != notes:
+            db.execute("UPDATE alerts SET notes=? WHERE api_id=?", (notes, aid))
+        other_open[aid] = notes
+    for aid in [i for i in other_open if i not in current]:
+        db.execute("UPDATE alerts SET ended_at=? WHERE api_id=?", (now_iso(), aid))
+        del other_open[aid]
+    db.commit()
+    return new
+
+
 async def poller(session: ClientSession):
     while True:
         try:
@@ -166,10 +236,19 @@ async def poller(session: ClientSession):
                     raise RuntimeError("429: забагато запитів, збільште POLL_SECONDS")
                 r.raise_for_status()
                 data = await r.json()
-            msg = process([a for a in data.get("alerts", []) if is_mine(a)])
+            alerts = data.get("alerts", [])
+            msg = process([a for a in alerts if is_siren(a)])
+            new_other = process_other([a for a in alerts if is_other(a)])
             state.update(updated=now_iso(), error=None)
             if msg:
                 await broadcast(msg)
+            if OTHER_NOTIFY:
+                for a in new_other:
+                    label = TYPE_LABELS.get(a.get("alert_type"), "Інша загроза")
+                    text = f"⚠️ {label}: {a.get('location_title')}"
+                    if a.get("notes"):
+                        text += f"\n{a['notes']}"
+                    await broadcast(text, silent=True)
         except Exception as e:
             log.error("poll error: %s", e)
             state["error"] = str(e)
@@ -209,19 +288,35 @@ def fmt(iso: str | None) -> str:
     return dt.strftime("%d.%m %H:%M")
 
 
-def get_log(limit=50):
-    return [dict(r) for r in db.execute("SELECT * FROM alerts ORDER BY started_at DESC LIMIT ?", (limit,))]
+def get_log(limit=50, other_limit=30):
+    """Останні тривоги + окремо останні інші загрози, разом за часом."""
+    siren = db.execute(
+        "SELECT * FROM alerts WHERE COALESCE(category,'siren')='siren' ORDER BY started_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    other = db.execute(
+        "SELECT * FROM alerts WHERE category='other' ORDER BY started_at DESC LIMIT ?",
+        (other_limit,),
+    ).fetchall()
+    rows = [dict(r) for r in siren] + [dict(r) for r in other]
+    rows.sort(key=lambda r: r["started_at"], reverse=True)
+    return rows
 
 
 async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    rows = get_log(10)
+    rows = get_log(10, 5)
     if not rows:
         await update.message.reply_text("Журнал порожній.")
         return
-    lines = [
-        f"{'🚀' if r['ballistic'] else '🚨'} {fmt(r['started_at'])} → {fmt(r['ended_at']) if r['ended_at'] else 'триває'}"
-        for r in rows
-    ]
+    def line(r):
+        end = fmt(r["ended_at"]) if r["ended_at"] else "триває"
+        if r.get("category") == "other":
+            label = TYPE_LABELS.get(r["alert_type"], "Інша загроза")
+            note = f" — {r['notes'][:80]}" if r.get("notes") else ""
+            return f"⚠️ {fmt(r['started_at'])} → {end} {label} ({r['location']}){note}"
+        return f"{'🚀' if r['ballistic'] else '🚨'} {fmt(r['started_at'])} → {end}"
+
+    lines = [line(r) for r in rows]
     await update.message.reply_text("Останні тривоги:\n" + "\n".join(lines))
 
 
@@ -238,7 +333,43 @@ async def h_sound(_):
 
 
 async def h_status(_):
-    return web.json_response({**state, "city": CITY_NAME})
+    if test["mode"] and time.time() < test["until"]:
+        return web.json_response(
+            {
+                **state,
+                "active": True,
+                "ballistic": test["mode"] == "ballistic",
+                "since": test["since"],
+                "test": True,
+                "city": CITY_NAME,
+            }
+        )
+    test["mode"] = None
+    return web.json_response({**state, "test": False, "city": CITY_NAME})
+
+
+async def h_test(request: web.Request):
+    """/api/test?key=ПАРОЛЬ&type=alert|ballistic|off&seconds=60&notify=1"""
+    if not TEST_KEY:
+        return web.json_response({"error": "Задайте змінну TEST_KEY у Railway"}, status=403)
+    q = request.query
+    if q.get("key") != TEST_KEY:
+        return web.json_response({"error": "Невірний key"}, status=403)
+    kind = q.get("type", "alert")
+    if kind == "off":
+        test["mode"] = None
+        return web.json_response({"ok": True, "test": "вимкнено"})
+    if kind not in ("alert", "ballistic"):
+        return web.json_response({"error": "type: alert | ballistic | off"}, status=400)
+    try:
+        seconds = min(600, max(10, int(q.get("seconds", "60"))))
+    except ValueError:
+        seconds = 60
+    test.update(mode=kind, until=time.time() + seconds, since=now_iso())
+    if q.get("notify") == "1":
+        label = "балістична загроза" if kind == "ballistic" else "повітряна тривога"
+        await broadcast(f"🧪 ТЕСТ ({label}) — {CITY_NAME}. Це перевірка, реальної загрози немає.")
+    return web.json_response({"ok": True, "test": kind, "seconds": seconds})
 
 
 async def h_log(_):
@@ -258,6 +389,7 @@ async def main():
             web.get("/alarm.mp3", h_sound),
             web.get("/api/status", h_status),
             web.get("/api/log", h_log),
+            web.get("/api/test", h_test),
         ]
     )
     runner = web.AppRunner(web_app)
