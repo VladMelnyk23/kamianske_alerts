@@ -8,7 +8,7 @@ from flask import Flask, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder='.')
 
-ALERTS_API_KEY = os.getenv("ALERTS_API_KEY", "")
+ALERTS_API_KEY = os.getenv("fe5dc97897bdbfe8508ad3e176318727b5b203b3ab2203", "")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
 TARGET_DISTRICT = "Кам'янськ"
