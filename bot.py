@@ -40,6 +40,7 @@ CITY_NAME = env("CITY_NAME", "Кам'янське")
 OBLAST = env("OBLAST", "Дніпропетровська область")
 # Шматок назви локації в API. Апострофи нормалізуються (' ’ ʼ).
 LOCATION_MATCH = env("LOCATION_MATCH", "Кам'янськ")
+SIREN_FILE = env("SIREN_FILE", "alarm.mp3")  # файл сирени в репозиторії
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 BASE = Path(__file__).parent
@@ -230,7 +231,10 @@ async def h_index(_):
 
 
 async def h_sound(_):
-    return web.FileResponse(BASE / "alarm.mp3")
+    path = BASE / Path(SIREN_FILE).name
+    if not path.is_file():
+        path = BASE / "alarm.mp3"
+    return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 async def h_status(_):
