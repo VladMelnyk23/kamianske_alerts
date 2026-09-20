@@ -19,17 +19,16 @@
 
     <h1>Моніторинг тривог: м. Кам'янське</h1>
     
-    <!-- Кнопка для розблокування звуку браузером -->
-    <button class="sound-btn" onclick="unlockAudio()">Увімкнути звук сирени</button>
+    <button class="sound-btn" onclick="unlockAudio()">🔊 Увімкнути звук сирени</button>
     
-    <div id="statusBox" class="status-box normal">Статус: Спокійно</div>
+    <div id="statusBox" class="status-box normal">Статус: Завантаження...</div>
 
     <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/emergency_alarm.ogg" preload="auto" loop></audio>
 
     <div class="log-container">
-        <h3>Лог подій (останні до 10 подій):</h3>
+        <h3>Лог подій (останні до 10):</h3>
         <div id="logList">
-            <div class="log-item">Система запущена. Очікування даних...</div>
+            <div class="log-item">Підключення до серверах...</div>
         </div>
     </div>
 
@@ -48,43 +47,49 @@
             }).catch(e => console.log(e));
         }
 
-        function addLog(message, type) {
-            const timeStr = new Date().toLocaleTimeString();
-            const div = document.createElement('div');
-            div.className = 'log-item';
-            div.style.color = type === 'ballistic' ? '#ff5252' : (type === 'uav' ? '#ffa726' : '#fff');
-            div.innerText = `[${timeStr}] ${message}`;
-            
-            // Додаємо новий лог на початок списку
-            logList.prepend(div);
+        async function fetchStatus() {
+            try {
+                let response = await fetch('/status');
+                let data = await response.json();
 
-            // Обмежуємо кількість записів: залишаємо максимум 10 штук
-            const items = logList.getElementsByClassName('log-item');
-            if (items.length > 10) {
-                // Видаляємо найстаріший (останній у списку)
-                logList.removeChild(items[items.length - 1]);
+                // Оновлюємо статус на екрані
+                if (data.current_status === 'ballistic') {
+                    statusBox.className = 'status-box alert-ballistic';
+                    statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
+                    if (audioUnlocked) alarmSound.play();
+                } else if (data.current_status === 'uav') {
+                    statusBox.className = 'status-box alert-uav';
+                    statusBox.innerText = '⚠️ ЗАГРОЗА БПЛА У РЕГІОНІ';
+                    if (audioUnlocked) alarmSound.play();
+                } else {
+                    statusBox.className = 'status-box normal';
+                    statusBox.innerText = 'Статус: Спокійно';
+                    alarmSound.pause();
+                    alarmSound.currentTime = 0;
+                }
+
+                // Оновлюємо лог (список минулих подій)
+                logList.innerHTML = '';
+                if (data.logs && data.logs.length > 0) {
+                    data.logs.forEach(item => {
+                        let div = document.createElement('div');
+                        div.className = 'log-item';
+                        div.style.color = item.type === 'ballistic' ? '#ff5252' : (item.type === 'uav' ? '#ffa726' : '#fff');
+                        div.innerText = `[${item.time}] ${item.text}`;
+                        logList.appendChild(div);
+                    });
+                } else {
+                    logList.innerHTML = '<div class="log-item">Подій поки немає. Спокійно.</div>';
+                }
+
+            } catch (e) {
+                console.log("Помилка отримання даних:", e);
             }
         }
 
-        function setAlertStatus(type) {
-            if (type === 'ballistic') {
-                statusBox.className = 'status-box alert-ballistic';
-                statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
-                if (audioUnlocked) alarmSound.play();
-                addLog("Зафіксовано балістичну загрозу!", "ballistic");
-            } else if (type === 'uav') {
-                statusBox.className = 'status-box alert-uav';
-                statusBox.innerText = '⚠️ ЗАГРОЗА БПЛА У РЕГІОНІ';
-                if (audioUnlocked) alarmSound.play();
-                addLog("Загроза БПЛА у регіоні.", "uav");
-            } else {
-                statusBox.className = 'status-box normal';
-                statusBox.innerText = 'Статус: Спокійно';
-                alarmSound.pause();
-                alarmSound.currentTime = 0;
-                addLog("Відбій тривоги.", "normal");
-            }
-        }
+        // Опитуємо наш сервер на Railway кожні 5 секунд
+        setInterval(fetchStatus, 5000);
+        fetchStatus();
     </script>
 </body>
 </html>
