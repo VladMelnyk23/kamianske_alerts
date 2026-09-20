@@ -15,8 +15,17 @@ log = logging.getLogger("alarm")
 
 
 def env(name: str, default: str = "") -> str:
-    """Читає змінну середовища й прибирає пробіли, переноси рядків та лапки."""
-    return os.getenv(name, default).strip().strip("\"'").strip()
+    """Читає змінну середовища (назва без урахування пробілів/регістру),
+    прибирає пробіли, переноси рядків та лапки зі значення."""
+    val = os.environ.get(name)
+    if val is None:
+        for k, v in os.environ.items():
+            if k.strip().upper() == name.upper():
+                val = v
+                break
+    if val is None:
+        val = default
+    return val.strip().strip("\"'").strip()
 
 
 # ---------- Налаштування (Railway -> Variables) ----------
@@ -234,6 +243,7 @@ async def h_log(_):
 
 async def main():
     global tg_app
+    log.info("Змінні середовища (лише назви): %s", sorted(repr(k) for k in os.environ if not k.startswith("RAILWAY_")))
     log.info("ALERTS_TOKEN: %s", f"задано ({len(ALERTS_TOKEN)} символів)" if ALERTS_TOKEN else "НЕ ЗАДАНО")
     log.info("BOT_TOKEN: %s", "задано" if BOT_TOKEN else "НЕ ЗАДАНО")
 
