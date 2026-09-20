@@ -18,16 +18,16 @@
 <body>
 
     <h1>Моніторинг тривог: м. Кам'янське</h1>
-
+    
     <!-- Кнопка для розблокування звуку браузером -->
     <button class="sound-btn" onclick="unlockAudio()">Увімкнути звук сирени</button>
-
+    
     <div id="statusBox" class="status-box normal">Статус: Спокійно</div>
 
     <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/emergency_alarm.ogg" preload="auto" loop></audio>
 
     <div class="log-container">
-        <h3>Лог подій (Кам'янське та регіон):</h3>
+        <h3>Лог подій (останні до 10 подій):</h3>
         <div id="logList">
             <div class="log-item">Система запущена. Очікування даних...</div>
         </div>
@@ -54,16 +54,29 @@
             div.className = 'log-item';
             div.style.color = type === 'ballistic' ? '#ff5252' : (type === 'uav' ? '#ffa726' : '#fff');
             div.innerText = `[${timeStr}] ${message}`;
+            
+            // Додаємо новий лог на початок списку
             logList.prepend(div);
+
+            // Обмежуємо кількість записів: залишаємо максимум 10 штук
+            const items = logList.getElementsByClassName('log-item');
+            if (items.length > 10) {
+                // Видаляємо найстаріший (останній у списку)
+                logList.removeChild(items[items.length - 1]);
+            }
         }
 
-        // Функція для зміни статусу (можна зв'язати з API або бекендом)
         function setAlertStatus(type) {
             if (type === 'ballistic') {
                 statusBox.className = 'status-box alert-ballistic';
                 statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
                 if (audioUnlocked) alarmSound.play();
                 addLog("Зафіксовано балістичну загрозу!", "ballistic");
+            } else if (type === 'uav') {
+                statusBox.className = 'status-box alert-uav';
+                statusBox.innerText = '⚠️ ЗАГРОЗА БПЛА У РЕГІОНІ';
+                if (audioUnlocked) alarmSound.play();
+                addLog("Загроза БПЛА у регіоні.", "uav");
             } else {
                 statusBox.className = 'status-box normal';
                 statusBox.innerText = 'Статус: Спокійно';
