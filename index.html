@@ -12,23 +12,26 @@
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         .log-container { max-width: 600px; margin: 0 auto; background: #1e1e1e; padding: 15px; border-radius: 8px; text-align: left; }
         .log-item { border-bottom: 1px solid #333; padding: 8px 0; font-size: 14px; }
-        .sound-btn { background: #ff5252; color: #fff; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
+        .sound-btn { background: #ff5252; color: #fff; border: none; padding: 12px 24px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; font-weight: bold; transition: 0.3s; }
+        .sound-btn:hover { opacity: 0.9; }
     </style>
 </head>
 <body>
 
     <h1>Моніторинг тривог: м. Кам'янське</h1>
     
+    <!-- Покращена кнопка розблокування звуку -->
     <button class="sound-btn" onclick="unlockAudio()">🔊 Увімкнути звук сирени</button>
     
     <div id="statusBox" class="status-box normal">Статус: Завантаження...</div>
 
-    <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/emergency_alarm.ogg" preload="auto" loop></audio>
+    <!-- Використовуємо надійне посилання на аудіосирену -->
+    <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg" preload="auto" loop></audio>
 
     <div class="log-container">
         <h3>Лог подій (останні до 10):</h3>
         <div id="logList">
-            <div class="log-item">Підключення до серверах...</div>
+            <div class="log-item">Підключення до сервера...</div>
         </div>
     </div>
 
@@ -39,12 +42,19 @@
         let audioUnlocked = false;
 
         function unlockAudio() {
+            // Примусово запускаємо та одразу ставимо на паузу аудіо для розблокування політики браузера
             alarmSound.play().then(() => {
                 alarmSound.pause();
                 alarmSound.currentTime = 0;
                 audioUnlocked = true;
-                alert("Звук сирени активовано!");
-            }).catch(e => console.log(e));
+                
+                let btn = document.querySelector('.sound-btn');
+                btn.style.backgroundColor = '#2e7d32';
+                btn.innerText = '✅ Звук сирени активовано';
+            }).catch(e => {
+                console.log("Помилка аудіо:", e);
+                alert("Браузер заблокував звук. Спробуйте ще раз.");
+            });
         }
 
         async function fetchStatus() {
@@ -52,15 +62,19 @@
                 let response = await fetch('/status');
                 let data = await response.json();
 
-                // Оновлюємо статус на екрані
+                // Оновлюємо статус на екрані та керуємо звуком
                 if (data.current_status === 'ballistic') {
                     statusBox.className = 'status-box alert-ballistic';
                     statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
-                    if (audioUnlocked) alarmSound.play();
+                    if (audioUnlocked && alarmSound.paused) {
+                        alarmSound.play().catch(err => console.log("Помилка відтворення сирени:", err));
+                    }
                 } else if (data.current_status === 'uav') {
                     statusBox.className = 'status-box alert-uav';
                     statusBox.innerText = '⚠️ ЗАГРОЗА БПЛА У РЕГІОНІ';
-                    if (audioUnlocked) alarmSound.play();
+                    if (audioUnlocked && alarmSound.paused) {
+                        alarmSound.play().catch(err => console.log("Помилка відтворення сирени:", err));
+                    }
                 } else {
                     statusBox.className = 'status-box normal';
                     statusBox.innerText = 'Статус: Спокійно';
@@ -68,7 +82,7 @@
                     alarmSound.currentTime = 0;
                 }
 
-                // Оновлюємо лог (список минулих подій)
+                // Оновлюємо лог подій
                 logList.innerHTML = '';
                 if (data.logs && data.logs.length > 0) {
                     data.logs.forEach(item => {
@@ -83,7 +97,7 @@
                 }
 
             } catch (e) {
-                console.log("Помилка отримання даних:", e);
+                console.log("Помилка з'єднання з сервером:", e);
             }
         }
 
