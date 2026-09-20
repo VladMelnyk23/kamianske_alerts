@@ -4,6 +4,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from aiohttp import ClientSession, ClientTimeout, web
 from telegram import Update
@@ -12,21 +13,31 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alarm")
 
+
+def env(name: str, default: str = "") -> str:
+    """Читає змінну середовища й прибирає пробіли, переноси рядків та лапки."""
+    return os.getenv(name, default).strip().strip("\"'").strip()
+
+
 # ---------- Налаштування (Railway -> Variables) ----------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ALERTS_TOKEN = os.getenv("ALERTS_TOKEN", "")
-PORT = int(os.getenv("PORT", "8080"))
-POLL_SECONDS = max(10, int(os.getenv("POLL_SECONDS", "20")))
-DB_PATH = os.getenv("DB_PATH", "alarm.db")  # на Railway: /data/alarm.db (Volume)
-CITY_NAME = os.getenv("CITY_NAME", "Кам'янське")
-OBLAST = os.getenv("OBLAST", "Дніпропетровська область")
+BOT_TOKEN = env("BOT_TOKEN")
+ALERTS_TOKEN = env("ALERTS_TOKEN")
+if ALERTS_TOKEN.lower().startswith("bearer "):
+    ALERTS_TOKEN = ALERTS_TOKEN[7:].strip()
+PORT = int(env("PORT", "8080"))
+POLL_SECONDS = max(10, int(env("POLL_SECONDS", "20")))
+DB_PATH = env("DB_PATH", "alarm.db")  # на Railway: /data/alarm.db (Volume)
+CITY_NAME = env("CITY_NAME", "Кам'янське")
+OBLAST = env("OBLAST", "Дніпропетровська область")
 # Шматок назви локації в API. Апострофи нормалізуються (' ’ ʼ).
-LOCATION_MATCH = os.getenv("LOCATION_MATCH", "Кам'янськ")
+LOCATION_MATCH = env("LOCATION_MATCH", "Кам'янськ")
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 BASE = Path(__file__).parent
+KYIV = ZoneInfo("Europe/Kyiv")
 
 # ---------- База даних ----------
+Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
 db.executescript(
@@ -49,7 +60,7 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def norm(s: str) -> str:
+def norm(s) -> str:
     return (s or "").replace("’", "'").replace("ʼ", "'").replace("`", "'").lower()
 
 
@@ -70,6 +81,8 @@ open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL")
 }
+if open_ids:
+    state.update(active=True, ballistic=any(open_ids.values()))
 tg_app: Application | None = None
 
 
@@ -104,9 +117,10 @@ def process(mine: list[dict]):
                 " VALUES(?,?,?,?,?)",
                 (aid, a.get("started_at") or now_iso(), a.get("alert_type"), int(b), a.get("location_title")),
             )
+            open_ids[aid] = b
         elif b and not open_ids[aid]:
             db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
-        open_ids[aid] = b or open_ids.get(aid, False)
+            open_ids[aid] = True
 
     for aid in [i for i in open_ids if i not in current]:
         db.execute("UPDATE alerts SET ended_at=? WHERE api_id=?", (now_iso(), aid))
@@ -133,7 +147,13 @@ def process(mine: list[dict]):
 async def poller(session: ClientSession):
     while True:
         try:
+            if not ALERTS_TOKEN:
+                raise RuntimeError("ALERTS_TOKEN не задано у змінних Railway")
             async with session.get(API_URL, headers={"Authorization": f"Bearer {ALERTS_TOKEN}"}) as r:
+                if r.status == 401:
+                    raise RuntimeError("401 Unauthorized: перевірте ALERTS_TOKEN (токен alerts.in.ua)")
+                if r.status == 429:
+                    raise RuntimeError("429: забагато запитів, збільште POLL_SECONDS")
                 r.raise_for_status()
                 data = await r.json()
             msg = process([a for a in data.get("alerts", []) if is_mine(a)])
@@ -175,10 +195,12 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 def fmt(iso: str | None) -> str:
     if not iso:
         return "—"
-    from zoneinfo import ZoneInfo
-
-    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Kyiv"))
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(KYIV)
     return dt.strftime("%d.%m %H:%M")
+
+
+def get_log(limit=50):
+    return [dict(r) for r in db.execute("SELECT * FROM alerts ORDER BY started_at DESC LIMIT ?", (limit,))]
 
 
 async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -194,10 +216,6 @@ async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------- Веб ----------
-def get_log(limit=50):
-    return [dict(r) for r in db.execute("SELECT * FROM alerts ORDER BY started_at DESC LIMIT ?", (limit,))]
-
-
 async def h_index(_):
     return web.FileResponse(BASE / "index.html")
 
@@ -216,8 +234,8 @@ async def h_log(_):
 
 async def main():
     global tg_app
-    if not ALERTS_TOKEN:
-        log.warning("ALERTS_TOKEN не задано!")
+    log.info("ALERTS_TOKEN: %s", f"задано ({len(ALERTS_TOKEN)} символів)" if ALERTS_TOKEN else "НЕ ЗАДАНО")
+    log.info("BOT_TOKEN: %s", "задано" if BOT_TOKEN else "НЕ ЗАДАНО")
 
     web_app = web.Application()
     web_app.add_routes(
