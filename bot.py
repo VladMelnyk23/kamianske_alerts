@@ -37,7 +37,7 @@ def send_telegram_message(text):
         print(f"Помилка ТГ: {e}")
 
 async def spam_ballistic_alarm(details):
-    msg = f"🚨 **УВАГА! БАЛІСТИКА НА КАМ'ЯНСЬКЕ (Дніпровський район)** 🚨\n{details}"
+    msg = f"🚨 **УВАГА! БАЛІСТИКА НА КАМ'ЯНСЬКЕ!** 🚨\n{details}"
     for i in range(15):
         send_telegram_message(f"{msg} ({i+1}/15)")
         await asyncio.sleep(1)
@@ -52,30 +52,22 @@ def alert_checker_loop():
             response = requests.get(URL, headers=HEADERS, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                
-                # --- ДЕБАГ У КОНСОЛЬ RAILWAY ---
-                print("Отримано відповідь від API alerts.in.ua:", data)
-                
                 is_ballistic = False
                 is_uav = False
-                alert_details = "Дніпровський район"
+                alert_details = "Дніпропетровська область / регіон"
                 
                 active_alerts = data.get("alerts", [])
                 
                 for alert in active_alerts:
-                    # Перевіряємо всі можливі варіанти полів (включно з числовими або строковими ID)
                     loc_title = str(alert.get("location_title", "")).lower()
-                    loc_id = str(alert.get("location_uid", "")).lower()
                     region_id = str(alert.get("region_id", "")).lower()
                     
-                    print(f"Перевірка локації -> title: {loc_title}, uid: {loc_id}, region_id: {region_id}, type: {alert.get('type')}")
-                    
-                    # Шукаємо збіги за назвою або будь-яким посиланням на Дніпровський район / Дніпропетровщину / Кам'янське
-                    if "дніпровсь" in loc_title or "кам'ян" in loc_title or "дніпропетровсь" in loc_title or "9" in region_id:
+                    # Ловимо і область, і район, і місто (все, що стосується нашого регіону)
+                    if "дніпропетровськ" in loc_title or "дніпровськ" in loc_title or "кам'ян" in loc_title or region_id == "9" or "дніпропетровсь" in loc_title:
                         atype = alert.get("type")
                         notes = alert.get("notes") or alert.get("description") or loc_title
                         if notes:
-                            alert_details = f"📍 Локація: {notes}"
+                            alert_details = f"📍 Деталі: {notes}"
 
                         if atype == "ballistic":
                             is_ballistic = True
@@ -94,18 +86,16 @@ def alert_checker_loop():
                     last_ballistic_state = False
                     if not last_uav_state:
                         last_uav_state = True
-                        log_text = f"⚠️ Повітряна тривога / Загроза. {alert_details}"
+                        log_text = f"⚠️ Повітряна тривога в регіоні. {alert_details}"
                         add_log(log_text, "uav")
-                        send_telegram_message(f"⚠️ **Повітряна тривога / Загроза**\n{alert_details}")
+                        send_telegram_message(f"⚠️ **Повітряна тривога у Дніпропетровській області**\n{alert_details}")
                 else:
                     if current_alert_status != "normal":
                         add_log("✅ Відбій тривоги", "normal")
-                        send_telegram_message("✅ **Відбій тривоги** у Кам'янському (Дніпровський район).")
+                        send_telegram_message("✅ **Відбій тривоги** у Кам'янському.")
                     current_alert_status = "normal"
                     last_ballistic_state = False
                     last_uav_state = False
-            else:
-                print(f"Помилка статус коду API: {response.status_code}, текст: {response.text}")
         except Exception as e:
             print(f"Помилка опитування API: {e}")
         
@@ -130,7 +120,7 @@ def status():
 def test_ballistic():
     global current_alert_status
     current_alert_status = "ballistic"
-    details = "📍 Примітка: Тестовий запуск балістики (Дніпровський район)"
+    details = "📍 Примітка: Тестовий запуск балістики"
     add_log(f"🚨 ТЕСТОВА Балістична загроза! {details}", "ballistic")
     asyncio.run(spam_ballistic_alarm(details))
     return "Тестова балістика активована!"
