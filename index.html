@@ -11,8 +11,9 @@
   main { max-width:720px; margin:0 auto; padding:20px 16px 48px; }
   h1 { font-size:1.1rem; color:var(--muted); font-weight:500; margin:0 0 14px; }
   .status { border-radius:16px; padding:36px 20px; text-align:center; background:var(--ok); transition:background .3s; }
-  .status.alert { background:var(--bad); animation:pulse 1.2s infinite; }
-  .status.ballistic { background:#8b0000; animation:pulse .7s infinite; }
+  .status.alert { background:#e3b100; color:#1a1300; animation:pulse 1.2s infinite; }
+  .status.ballistic { background:#e5202a; animation:pulse .7s infinite; }
+  .status.test { background:#1f6feb; animation:pulse 1.5s infinite; }
   .status.error { background:#4d4d4d; }
   .status .big { font-size:2rem; font-weight:700; }
   .status .sub { margin-top:8px; opacity:.9; }
@@ -109,10 +110,11 @@ async function loadStatus() {
     document.getElementById('city').textContent = s.city;
     cur = 'ok';
     if (s.ballistic) cur = 'ballistic'; else if (s.active) cur = 'alert';
-    box.className = 'status ' + (cur === 'ok' ? '' : cur);
+    box.className = 'status ' + (s.test ? 'test' : (cur === 'ok' ? '' : cur));
     if (cur === 'ballistic') { big.textContent = '🚀 БАЛІСТИЧНА ЗАГРОЗА'; sub.textContent = 'Негайно в укриття! З ' + fmt(s.since); }
-    else if (cur === 'alert') { big.textContent = '🚨 ПОВІТРЯНА ТРИВОГА'; sub.textContent = 'З ' + fmt(s.since); }
+    else if (cur === 'alert') { big.textContent = '⚠️ ПОВІТРЯНА ТРИВОГА'; sub.textContent = 'З ' + fmt(s.since); }
     else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
+    if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
     if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
     document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
 
