@@ -1,302 +1,129 @@
 <!DOCTYPE html>
 <html lang="uk">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Моніторинг тривог — Кам'янське</title>
-    <style>
-        :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
-            --text-color: #f8fafc;
-            --text-muted: #94a3b8;
-            --success-color: #10b981;
-            --ballistic-color: #ef4444;
-            --uav-color: #f59e0b;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            padding: 16px;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 550px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        /* Шапка з автором */
-        .author-badge {
-            font-size: 13px;
-            color: var(--text-muted);
-            text-align: center;
-            background: rgba(255, 255, 255, 0.03);
-            padding: 6px 12px;
-            border-radius: 20px;
-            align-self: center;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        .author-badge span {
-            color: var(--text-color);
-            font-weight: 600;
-        }
-
-        header h1 {
-            font-size: 22px;
-            font-weight: 700;
-            text-align: center;
-            margin-bottom: 4px;
-        }
-
-        /* Блок статусу */
-        .status-box {
-            padding: 24px 16px;
-            border-radius: 16px;
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-        }
-        .normal {
-            background: linear-gradient(135deg, #065f46, #047857);
-            color: #ecfdf5;
-        }
-        .alert-ballistic {
-            background: linear-gradient(135deg, #991b1b, #dc2626);
-            color: #fef2f2;
-            animation: pulse-red 1s infinite alternate;
-        }
-        .alert-uav {
-            background: linear-gradient(135deg, #92400e, #d97706);
-            color: #fffbeb;
-            animation: pulse-orange 1.5s infinite alternate;
-        }
-
-        @keyframes pulse-red {
-            0% { transform: scale(1); box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
-            100% { transform: scale(1.02); box-shadow: 0 0 25px rgba(239, 68, 68, 0.7); }
-        }
-        @keyframes pulse-orange {
-            0% { transform: scale(1); box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
-            100% { transform: scale(1.02); box-shadow: 0 0 25px rgba(245, 158, 11, 0.7); }
-        }
-
-        /* Кнопки керування звуком */
-        .btn-container {
-            display: flex;
-            gap: 10px;
-            width: 100%;
-        }
-        .action-btn {
-            flex: 1;
-            padding: 14px;
-            font-size: 15px;
-            font-weight: 600;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: opacity 0.2s, transform 0.1s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        .action-btn:active {
-            transform: scale(0.98);
-        }
-        .sound-btn {
-            background-color: #3b82f6;
-            color: white;
-        }
-        .sound-btn.active {
-            background-color: var(--success-color);
-        }
-        .mute-btn {
-            background-color: #ef4444;
-            color: white;
-            display: none;
-        }
-
-        /* Лог подій */
-        .log-container {
-            background-color: var(--card-bg);
-            border-radius: 16px;
-            padding: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        .log-header {
-            font-size: 15px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: var(--text-muted);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            padding-bottom: 8px;
-        }
-        #logList {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            max-height: 250px;
-            overflow-y: auto;
-        }
-        .log-item {
-            padding: 10px 12px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 8px;
-            font-size: 13px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* Мобільна адаптація */
-        @media (max-width: 480px) {
-            body { padding: 10px; }
-            header h1 { font-size: 19px; }
-            .status-box { font-size: 18px; padding: 20px 12px; }
-            .btn-container { flex-direction: column; }
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тривога — Кам'янське</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --text:#e6edf3; --muted:#8b949e; --ok:#238636; --warn:#d29922; --bad:#da3633; --line:#30363d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:1.1rem; color:var(--muted); font-weight:500; margin:0 0 14px; }
+  .status { border-radius:16px; padding:36px 20px; text-align:center; background:var(--ok); transition:background .3s; }
+  .status.alert { background:var(--bad); animation:pulse 1.2s infinite; }
+  .status.ballistic { background:#8b0000; animation:pulse .7s infinite; }
+  .status.error { background:#4d4d4d; }
+  .status .big { font-size:2rem; font-weight:700; }
+  .status .sub { margin-top:8px; opacity:.9; }
+  @keyframes pulse { 50% { filter:brightness(1.35); } }
+  button { margin:14px 0; padding:10px 16px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:.95rem; cursor:pointer; }
+  button.on { border-color:var(--ok); }
+  h2 { font-size:1.05rem; margin:26px 0 10px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; font-size:.92rem; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
+  tr:last-child td { border-bottom:0; }
+  .tag { padding:2px 8px; border-radius:6px; font-size:.8rem; background:var(--warn); color:#000; }
+  .tag.b { background:var(--bad); color:#fff; }
+  .wrap { overflow-x:auto; }
+  .muted { color:var(--muted); font-size:.85rem; }
+</style>
 </head>
 <body>
+<main>
+  <h1>Моніторинг тривог · <span id="city">Кам'янське</span></h1>
+  <div id="status" class="status">
+    <div class="big" id="big">Завантаження…</div>
+    <div class="sub" id="sub"></div>
+  </div>
+  <button id="soundBtn">🔇 Увімкнути звук</button>
+  <div class="muted" id="updated"></div>
 
-    <div class="container">
-        <!-- Інформація про автора -->
-        <div class="author-badge">
-            Розробник сервісу: <span>Vladyslav Melnyk</span>
-        </div>
+  <h2>Останні 50 тривог</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th></tr></thead>
+      <tbody id="log"><tr><td colspan="4" class="muted">Завантаження…</td></tr></tbody>
+    </table>
+  </div>
+</main>
 
-        <header>
-            <h1>Моніторинг тривог</h1>
-            <p style="text-align: center; color: var(--text-muted); font-size: 14px;">м. Кам'янське та регіон</p>
-        </header>
-        
-        <div class="btn-container">
-            <button id="enableBtn" class="action-btn sound-btn" onclick="unlockAudio()">🔊 Дозволити звук</button>
-            <button id="muteBtn" class="action-btn mute-btn" onclick="toggleMute()">🔕 Вимкнути сирену</button>
-        </div>
-        
-        <div id="statusBox" class="status-box normal">Статус: Завантаження...</div>
+<script>
+const TZ = 'Europe/Kyiv';
+const fmt = iso => iso ? new Date(iso).toLocaleString('uk-UA', {timeZone:TZ, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '—';
+const dur = (a, b) => {
+  const m = Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 60000));
+  return m >= 60 ? `${Math.floor(m/60)} год ${m%60} хв` : `${m} хв`;
+};
 
-        <audio id="alarmSound" src="alarm.mp3" preload="auto" loop></audio>
+const audio = new Audio('/alarm.mp3');
+let soundOn = false, prev = 'ok';
+const btn = document.getElementById('soundBtn');
+btn.onclick = () => {
+  soundOn = !soundOn;
+  btn.classList.toggle('on', soundOn);
+  btn.textContent = soundOn ? '🔊 Звук увімкнено' : '🔇 Увімкнути звук';
+  if (soundOn) { audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {}); }
+  else audio.pause();
+};
 
-        <div class="log-container">
-            <div class="log-header">Лог подій (останні до 10):</div>
-            <div id="logList">
-                <div class="log-item" style="color: var(--text-muted);">Підключення до серверну...</div>
-            </div>
-        </div>
-    </div>
+function play(loop) {
+  if (!soundOn) return;
+  audio.loop = loop;
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
 
-    <script>
-        const statusBox = document.getElementById('statusBox');
-        const alarmSound = document.getElementById('alarmSound');
-        const logList = document.getElementById('logList');
-        const enableBtn = document.getElementById('enableBtn');
-        const muteBtn = document.getElementById('muteBtn');
+async function loadStatus() {
+  const box = document.getElementById('status'), big = document.getElementById('big'), sub = document.getElementById('sub');
+  try {
+    const s = await (await fetch('/api/status')).json();
+    document.getElementById('city').textContent = s.city;
+    let cur = 'ok';
+    if (s.ballistic) cur = 'ballistic'; else if (s.active) cur = 'alert';
+    box.className = 'status ' + (cur === 'ok' ? '' : cur);
+    if (cur === 'ballistic') { big.textContent = '🚀 БАЛІСТИЧНА ЗАГРОЗА'; sub.textContent = 'Негайно в укриття! З ' + fmt(s.since); }
+    else if (cur === 'alert') { big.textContent = '🚨 ПОВІТРЯНА ТРИВОГА'; sub.textContent = 'З ' + fmt(s.since); }
+    else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
+    document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
 
-        let audioAllowed = false;
-        let soundManuallyMuted = false;
+    if (cur !== prev) {
+      if (cur === 'ballistic') play(true);
+      else if (cur === 'alert') play(false);
+      else audio.pause();
+      prev = cur;
+    }
+  } catch (e) {
+    box.className = 'status error';
+    big.textContent = 'Немає зв\'язку із сервером';
+    sub.textContent = '';
+  }
+}
 
-        function unlockAudio() {
-            alarmSound.play().then(() => {
-                alarmSound.pause();
-                alarmSound.currentTime = 0;
-                audioAllowed = true;
-                soundManuallyMuted = false;
-                
-                enableBtn.classList.add('active');
-                enableBtn.innerText = '✅ Звук активовано';
-                muteBtn.style.display = 'flex';
-            }).catch(e => {
-                console.log("Помилка аудіо:", e);
-                alert("Браузер заблокував звук або файл alarm.mp3 не знайдено.");
-            });
-        }
+async function loadLog() {
+  const tbody = document.getElementById('log');
+  try {
+    const rows = await (await fetch('/api/log')).json();
+    tbody.innerHTML = '';
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted">Записів ще немає</td></tr>'; return; }
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      const cells = [fmt(r.started_at), r.ended_at ? fmt(r.ended_at) : 'триває', dur(r.started_at, r.ended_at)];
+      for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
+      const td = document.createElement('td');
+      const tag = document.createElement('span');
+      tag.className = 'tag' + (r.ballistic ? ' b' : '');
+      tag.textContent = r.ballistic ? 'Балістика' : 'Повітряна';
+      td.appendChild(tag); tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+  } catch (e) {}
+}
 
-        function toggleMute() {
-            soundManuallyMuted = true;
-            alarmSound.pause();
-            alarmSound.currentTime = 0;
-            muteBtn.style.backgroundColor = '#475569';
-            muteBtn.innerText = '🔇 Сирену вимкнено';
-        }
-
-        async function fetchStatus() {
-            try {
-                let response = await fetch('/status');
-                let data = await response.json();
-
-                if (data.current_status === 'ballistic') {
-                    statusBox.className = 'status-box alert-ballistic';
-                    statusBox.innerText = '🚨 БАЛІСТИЧНА ЗАГРОЗА У КАМ\'ЯНСЬКОМУ! 🚨';
-                    
-                    if (audioAllowed && !soundManuallyMuted && alarmSound.paused) {
-                        alarmSound.play().catch(err => console.log("Помилка відтворення:", err));
-                    }
-                } else if (data.current_status === 'uav') {
-                    statusBox.className = 'status-box alert-uav';
-                    statusBox.innerText = '⚠️ ЗАГРОЗА БПЛА У РЕГІОНІ';
-                    if (audioAllowed && !soundManuallyMuted && alarmSound.paused) {
-                        alarmSound.play().catch(err => console.log("Помилка відтворення:", err));
-                    }
-                } else {
-                    statusBox.className = 'status-box normal';
-                    statusBox.innerText = 'Статус: Спокійно';
-                    
-                    soundManuallyMuted = false;
-                    muteBtn.style.backgroundColor = '#ef4444';
-                    muteBtn.innerText = '🔕 Вимкнути сирену';
-
-                    alarmSound.pause();
-                    alarmSound.currentTime = 0;
-                }
-
-                // Оновлення логу подій
-                logList.innerHTML = '';
-                if (data.logs && data.logs.length > 0) {
-                    data.logs.forEach(item => {
-                        let div = document.createElement('div');
-                        div.className = 'log-item';
-                        
-                        let colorStyle = 'color: var(--success-color);';
-                        if (item.type === 'ballistic') {
-                            colorStyle = 'color: var(--ballistic-color); font-weight: bold;';
-                        } else if (item.type === 'uav') {
-                            colorStyle = 'color: var(--uav-color); font-weight: bold;';
-                        }
-
-                        div.innerHTML = `<span>${item.text}</span><span style="font-size: 11px; opacity: 0.7; ${colorStyle}">${item.time}</span>`;
-                        logList.appendChild(div);
-                    });
-                } else {
-                    logList.innerHTML = '<div class="log-item" style="color: var(--text-muted);">Подій поки немає. Спокійно.</div>';
-                }
-
-            } catch (e) {
-                console.log("Помилка з'єднання:", e);
-            }
-        }
-
-        setInterval(fetchStatus, 5000);
-        fetchStatus();
-    </script>
+loadStatus(); loadLog();
+setInterval(loadStatus, 10000);
+setInterval(loadLog, 30000);
+</script>
 </body>
 </html>
