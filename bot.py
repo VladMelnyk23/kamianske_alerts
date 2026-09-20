@@ -8,8 +8,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientSession, ClientTimeout, web
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import BotCommand, ReplyKeyboardMarkup, Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alarm")
@@ -216,6 +216,52 @@ async def broadcast(text: str, silent: bool = False):
                 db.commit()
 
 
+# ---------- Оформлення повідомлень ----------
+RED = "🔴🚨" * 7      # балістика
+YELLOW = "🟡⚠️" * 7   # повітряна тривога
+BLUE = "🔵🧪" * 7     # тест
+GREEN = "🟢✅" * 7    # відбій
+
+
+def msg_ballistic() -> str:
+    return (
+        f"{RED}\n{RED}\n\n"
+        f"🚀🚀 БАЛІСТИЧНА ЗАГРОЗА 🚀🚀\n"
+        f"📍 {CITY_NAME}\n\n"
+        f"❗❗ НЕГАЙНО В УКРИТТЯ! ❗❗\n\n"
+        f"{RED}\n{RED}"
+    )
+
+
+def msg_alert(suffix: str = "") -> str:
+    return (
+        f"{YELLOW}\n\n"
+        f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
+        f"📍 {CITY_NAME}{suffix}\n\n"
+        f"Прямуйте в укриття.\n\n"
+        f"{YELLOW}"
+    )
+
+
+def msg_test(label: str) -> str:
+    return (
+        f"{BLUE}\n\n"
+        f"🧪 ТЕСТ: {label} 🧪\n"
+        f"📍 {CITY_NAME}\n\n"
+        f"Це перевірка, реальної загрози немає.\n\n"
+        f"{BLUE}"
+    )
+
+
+def msg_clear() -> str:
+    return (
+        f"{GREEN}\n\n"
+        f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
+        f"📍 {CITY_NAME}\n\n"
+        f"{GREEN}"
+    )
+
+
 bg_tasks: set = set()
 
 
@@ -285,11 +331,11 @@ def process(mine: list[dict]):
     labels = sorted({l for a in mine for l in threat_labels(a)})
     suffix = f" ({', '.join(labels)})" if labels else ""
     if is_bal and not was_ballistic:
-        return f"🚀 БАЛІСТИЧНА ЗАГРОЗА — {CITY_NAME}! Негайно в укриття!"
+        return "ballistic", msg_ballistic()
     if is_active and not was_active:
-        return f"🚨 Повітряна тривога — {CITY_NAME}{suffix}! Прямуйте в укриття."
+        return "alert", msg_alert(suffix)
     if was_active and not is_active:
-        return f"✅ Відбій тривоги — {CITY_NAME}."
+        return "clear", msg_clear()
     return None
 
 
@@ -331,11 +377,12 @@ async def poller(session: ClientSession):
                 r.raise_for_status()
                 data = await r.json()
             alerts = data.get("alerts", [])
-            msg = process([a for a in alerts if is_siren(a)])
+            res = process([a for a in alerts if is_siren(a)])
             new_other = process_other([a for a in alerts if is_other(a)])
             state.update(updated=now_iso(), error=None)
-            if msg:
-                coro = send_alert_message(msg, msg.startswith("🚀"), lambda: state["ballistic"])
+            if res:
+                kind, msg = res
+                coro = send_alert_message(msg, kind == "ballistic", lambda: state["ballistic"])
                 if coro:
                     await coro
             if OTHER_NOTIFY:
@@ -352,29 +399,54 @@ async def poller(session: ClientSession):
 
 
 # ---------- Telegram ----------
+BTN_STATUS = "📊 Статус"
+BTN_LOG = "📜 Журнал"
+BTN_SUB = "🔔 Підписатись"
+BTN_UNSUB = "🔕 Відписатись"
+
+# Постійні кнопки під полем введення
+MENU = ReplyKeyboardMarkup(
+    [[BTN_STATUS, BTN_LOG], [BTN_SUB, BTN_UNSUB]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
+BOT_COMMANDS = [
+    BotCommand("start", "Підписатись на сповіщення"),
+    BotCommand("status", "Поточний стан"),
+    BotCommand("log", "Останні тривоги"),
+    BotCommand("stop", "Відписатись"),
+    BotCommand("menu", "Показати кнопки"),
+]
+
+
+async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Меню:", reply_markup=MENU)
+
+
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     db.execute("INSERT OR IGNORE INTO subscribers VALUES(?)", (update.effective_chat.id,))
     db.commit()
     await update.message.reply_text(
-        f"Ви підписані на тривоги: {CITY_NAME}.\n"
-        "/status — поточний стан\n/log — останні тривоги\n/stop — відписатись"
+        f"Ви підписані на тривоги: {CITY_NAME}.\nКерувати ботом можна кнопками нижче.",
+        reply_markup=MENU,
     )
 
 
 async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     db.execute("DELETE FROM subscribers WHERE chat_id=?", (update.effective_chat.id,))
     db.commit()
-    await update.message.reply_text("Ви відписались. /start — підписатись знову.")
+    await update.message.reply_text("Ви відписались. Натисніть «🔔 Підписатись», щоб повернутись.", reply_markup=MENU)
 
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state["ballistic"]:
-        t = "🚀 Балістична загроза!"
+        t = "🔴🚀 Балістична загроза!"
     elif state["active"]:
-        t = "🚨 Триває повітряна тривога."
+        t = "🟡⚠️ Триває повітряна тривога."
     else:
-        t = "✅ Зараз тихо."
-    await update.message.reply_text(f"{CITY_NAME}: {t}")
+        t = "🟢✅ Зараз тихо."
+    await update.message.reply_text(f"{CITY_NAME}: {t}", reply_markup=MENU)
 
 
 def fmt(iso: str | None) -> str:
@@ -405,21 +477,31 @@ def get_log(limit=50, other_limit=30):
 async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     rows = get_log(10, 5)
     if not rows:
-        await update.message.reply_text("Журнал порожній.")
+        await update.message.reply_text("Журнал порожній.", reply_markup=MENU)
         return
     def line(r):
         end = fmt(r["ended_at"]) if r["ended_at"] else "триває"
         if r.get("category") == "test":
-            return f"🧪 {fmt(r['started_at'])} → {end} {r.get('notes') or 'ТЕСТ'}"
+            return f"🔵 {fmt(r['started_at'])} → {end} {r.get('notes') or 'ТЕСТ'}"
         if r.get("category") == "other":
             label = TYPE_LABELS.get(r["alert_type"], "Інша загроза")
             note = f" — {r['notes'][:80]}" if r.get("notes") else ""
             return f"⚠️ {fmt(r['started_at'])} → {end} {label} ({r['location']}){note}"
         note = f" — {r['notes']}" if r.get("notes") else ""
-        return f"{'🚀' if r['ballistic'] else '🚨'} {fmt(r['started_at'])} → {end}{note}"
+        return f"{'🔴' if r['ballistic'] else '🟡'} {fmt(r['started_at'])} → {end}{note}"
 
     lines = [line(r) for r in rows]
-    await update.message.reply_text("Останні тривоги:\n" + "\n".join(lines))
+    await update.message.reply_text("Останні тривоги:\n" + "\n".join(lines), reply_markup=MENU)
+
+
+async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Натискання кнопок меню (вони надсилають звичайний текст)."""
+    actions = {BTN_STATUS: cmd_status, BTN_LOG: cmd_log, BTN_SUB: cmd_start, BTN_UNSUB: cmd_stop}
+    action = actions.get((update.message.text or "").strip())
+    if action:
+        await action(update, ctx)
+    else:
+        await update.message.reply_text("Оберіть дію кнопками нижче.", reply_markup=MENU)
 
 
 # ---------- Веб ----------
@@ -481,7 +563,7 @@ async def h_test(request: web.Request):
     db.commit()
     test.update(mode=kind, until=time.time() + seconds, since=since, id=tid)
     if q.get("notify") == "1":
-        text = f"🧪 ТЕСТ ({label}) — {CITY_NAME}. Це перевірка, реальної загрози немає."
+        text = msg_test(label)
         coro = send_alert_message(
             text,
             kind == "ballistic",
@@ -523,7 +605,13 @@ async def main():
         tg_app.add_handler(CommandHandler("stop", cmd_stop))
         tg_app.add_handler(CommandHandler("status", cmd_status))
         tg_app.add_handler(CommandHandler("log", cmd_log))
+        tg_app.add_handler(CommandHandler("menu", cmd_menu))
+        tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_button))
         await tg_app.initialize()
+        try:
+            await tg_app.bot.set_my_commands(BOT_COMMANDS)  # кнопка «Меню» біля поля введення
+        except Exception as e:
+            log.warning("set_my_commands failed: %s", e)
         await tg_app.start()
         await tg_app.updater.start_polling()
     else:
