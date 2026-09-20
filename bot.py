@@ -1,143 +1,253 @@
-import time
-import requests
 import asyncio
-import threading
+import logging
 import os
-from datetime import datetime, timezone, timedelta
-from flask import Flask, jsonify, send_from_directory
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 
-app = Flask(__name__, static_folder='.')
+from aiohttp import ClientSession, ClientTimeout, web
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-ALERTS_API_KEY = os.getenv("ALERTS_API_KEY", "")
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
-CHAT_ID = os.getenv("CHAT_ID", "")
-URL = "https://api.alerts.in.ua/v1/iot/active_air_raids.json"
-HEADERS = {"Authorization": f"Bearer {ALERTS_API_KEY}"}
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("alarm")
 
-current_alert_status = "normal"
-logs_history = []
+# ---------- Налаштування (Railway -> Variables) ----------
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ALERTS_TOKEN = os.getenv("ALERTS_TOKEN", "")
+PORT = int(os.getenv("PORT", "8080"))
+POLL_SECONDS = max(10, int(os.getenv("POLL_SECONDS", "20")))
+DB_PATH = os.getenv("DB_PATH", "alarm.db")  # на Railway: /data/alarm.db (Volume)
+CITY_NAME = os.getenv("CITY_NAME", "Кам'янське")
+OBLAST = os.getenv("OBLAST", "Дніпропетровська область")
+# Шматок назви локації в API. Апострофи нормалізуються (' ’ ʼ).
+LOCATION_MATCH = os.getenv("LOCATION_MATCH", "Кам'янськ")
 
-def add_log(text, alert_type):
-    global logs_history
-    kiev_time = datetime.now(timezone(timedelta(hours=3)))
-    time_str = kiev_time.strftime("%H:%M:%S")
-    
-    if not logs_history or logs_history[0]["text"] != text:
-        logs_history.insert(0, {"time": time_str, "text": text, "type": alert_type})
-        if len(logs_history) > 100:
-            logs_history.pop()
+API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
+BASE = Path(__file__).parent
 
-def send_telegram_message(text):
-    if not TG_BOT_TOKEN or not CHAT_ID:
+# ---------- База даних ----------
+db = sqlite3.connect(DB_PATH, check_same_thread=False)
+db.row_factory = sqlite3.Row
+db.executescript(
+    """
+    CREATE TABLE IF NOT EXISTS alerts(
+        api_id INTEGER PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        alert_type TEXT,
+        ballistic INTEGER DEFAULT 0,
+        location TEXT
+    );
+    CREATE TABLE IF NOT EXISTS subscribers(chat_id INTEGER PRIMARY KEY);
+    """
+)
+db.commit()
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def norm(s: str) -> str:
+    return (s or "").replace("’", "'").replace("ʼ", "'").replace("`", "'").lower()
+
+
+def is_mine(a: dict) -> bool:
+    return norm(OBLAST) == norm(a.get("location_oblast")) and norm(LOCATION_MATCH) in norm(
+        a.get("location_title")
+    )
+
+
+def is_ballistic(a: dict) -> bool:
+    text = norm(a.get("alert_type")) + " " + norm(a.get("notes"))
+    return "ballistic" in text or "балістик" in text
+
+
+# ---------- Стан ----------
+state = {"active": False, "ballistic": False, "since": None, "updated": None, "error": None}
+open_ids: dict[int, bool] = {
+    r["api_id"]: bool(r["ballistic"])
+    for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL")
+}
+tg_app: Application | None = None
+
+
+def subscribers():
+    return [r["chat_id"] for r in db.execute("SELECT chat_id FROM subscribers")]
+
+
+async def broadcast(text: str):
+    if not tg_app:
         return
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=5)
-    except Exception as e:
-        print(f"Помилка ТГ: {e}")
+    for chat_id in subscribers():
+        try:
+            await tg_app.bot.send_message(chat_id, text)
+        except Exception as e:  # заблокований бот тощо
+            log.warning("send to %s failed: %s", chat_id, e)
+            if "forbidden" in str(e).lower() or "chat not found" in str(e).lower():
+                db.execute("DELETE FROM subscribers WHERE chat_id=?", (chat_id,))
+                db.commit()
 
-async def spam_ballistic_alarm(details):
-    msg = f"🚨 **УВАГА! БАЛІСТИКА НА КАМ'ЯНСЬКЕ!** 🚨\n{details}"
-    for i in range(15):
-        send_telegram_message(f"{msg} ({i+1}/15)")
-        await asyncio.sleep(1)
 
-def alert_checker_loop():
-    global current_alert_status
-    last_ballistic_state = False
-    last_uav_state = False
-    
+def process(mine: list[dict]):
+    """Оновлює БД і повертає повідомлення для розсилки (або None)."""
+    was_active = bool(open_ids)
+    was_ballistic = any(open_ids.values())
+    current = {a["id"]: a for a in mine}
+
+    for aid, a in current.items():
+        b = is_ballistic(a)
+        if aid not in open_ids:
+            db.execute(
+                "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location)"
+                " VALUES(?,?,?,?,?)",
+                (aid, a.get("started_at") or now_iso(), a.get("alert_type"), int(b), a.get("location_title")),
+            )
+        elif b and not open_ids[aid]:
+            db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
+        open_ids[aid] = b or open_ids.get(aid, False)
+
+    for aid in [i for i in open_ids if i not in current]:
+        db.execute("UPDATE alerts SET ended_at=? WHERE api_id=?", (now_iso(), aid))
+        del open_ids[aid]
+    db.commit()
+
+    is_active = bool(open_ids)
+    is_bal = any(open_ids.values())
+    if is_active and not was_active:
+        state["since"] = now_iso()
+    if not is_active:
+        state["since"] = None
+    state.update(active=is_active, ballistic=is_bal)
+
+    if is_bal and not was_ballistic:
+        return f"🚀 БАЛІСТИЧНА ЗАГРОЗА — {CITY_NAME}! Негайно в укриття!"
+    if is_active and not was_active:
+        return f"🚨 Повітряна тривога — {CITY_NAME}! Прямуйте в укриття."
+    if was_active and not is_active:
+        return f"✅ Відбій тривоги — {CITY_NAME}."
+    return None
+
+
+async def poller(session: ClientSession):
     while True:
         try:
-            response = requests.get(URL, headers=HEADERS, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                is_ballistic = False
-                is_uav = False
-                alert_details = "Дніпропетровська область / регіон"
-                
-                active_alerts = data.get("alerts", [])
-                
-                for alert in active_alerts:
-                    loc_title = str(alert.get("location_title", "")).lower()
-                    region_id = str(alert.get("region_id", "")).lower()
-                    
-                    # Ловимо і область, і район, і місто (все, що стосується нашого регіону)
-                    if "дніпропетровськ" in loc_title or "дніпровськ" in loc_title or "кам'ян" in loc_title or region_id == "9" or "дніпропетровсь" in loc_title:
-                        atype = alert.get("type")
-                        notes = alert.get("notes") or alert.get("description") or loc_title
-                        if notes:
-                            alert_details = f"📍 Деталі: {notes}"
-
-                        if atype == "ballistic":
-                            is_ballistic = True
-                        elif atype in ["artillery", "uav", "air_raid"]:
-                            is_uav = True
-
-                if is_ballistic:
-                    current_alert_status = "ballistic"
-                    log_text = f"🚨 Балістична загроза! {alert_details}"
-                    add_log(log_text, "ballistic")
-                    if not last_ballistic_state:
-                        last_ballistic_state = True
-                        asyncio.run(spam_ballistic_alarm(alert_details))
-                elif is_uav:
-                    current_alert_status = "uav"
-                    last_ballistic_state = False
-                    if not last_uav_state:
-                        last_uav_state = True
-                        log_text = f"⚠️ Повітряна тривога в регіоні. {alert_details}"
-                        add_log(log_text, "uav")
-                        send_telegram_message(f"⚠️ **Повітряна тривога у Дніпропетровській області**\n{alert_details}")
-                else:
-                    if current_alert_status != "normal":
-                        add_log("✅ Відбій тривоги", "normal")
-                        send_telegram_message("✅ **Відбій тривоги** у Кам'янському.")
-                    current_alert_status = "normal"
-                    last_ballistic_state = False
-                    last_uav_state = False
+            async with session.get(API_URL, headers={"Authorization": f"Bearer {ALERTS_TOKEN}"}) as r:
+                r.raise_for_status()
+                data = await r.json()
+            msg = process([a for a in data.get("alerts", []) if is_mine(a)])
+            state.update(updated=now_iso(), error=None)
+            if msg:
+                await broadcast(msg)
         except Exception as e:
-            print(f"Помилка опитування API: {e}")
-        
-        time.sleep(10)
+            log.error("poll error: %s", e)
+            state["error"] = str(e)
+        await asyncio.sleep(POLL_SECONDS)
 
-@app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
 
-@app.route('/alarm.mp3')
-def serve_audio():
-    return send_from_directory('.', 'alarm.mp3')
+# ---------- Telegram ----------
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    db.execute("INSERT OR IGNORE INTO subscribers VALUES(?)", (update.effective_chat.id,))
+    db.commit()
+    await update.message.reply_text(
+        f"Ви підписані на тривоги: {CITY_NAME}.\n"
+        "/status — поточний стан\n/log — останні тривоги\n/stop — відписатись"
+    )
 
-@app.route('/status')
-def status():
-    return jsonify({
-        "current_status": current_alert_status,
-        "logs": logs_history
-    })
 
-@app.route('/test-ballistic')
-def test_ballistic():
-    global current_alert_status
-    current_alert_status = "ballistic"
-    details = "📍 Примітка: Тестовий запуск балістики"
-    add_log(f"🚨 ТЕСТОВА Балістична загроза! {details}", "ballistic")
-    asyncio.run(spam_ballistic_alarm(details))
-    return "Тестова балістика активована!"
+async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    db.execute("DELETE FROM subscribers WHERE chat_id=?", (update.effective_chat.id,))
+    db.commit()
+    await update.message.reply_text("Ви відписались. /start — підписатись знову.")
 
-@app.route('/test-normal')
-def test_normal():
-    global current_alert_status
-    current_alert_status = "normal"
-    add_log("✅ Тестовий відбій тривоги", "normal")
-    return "Статус скинуто до 'Спокійно'."
 
-def run_bot_background():
-    alert_checker_loop()
+async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if state["ballistic"]:
+        t = "🚀 Балістична загроза!"
+    elif state["active"]:
+        t = "🚨 Триває повітряна тривога."
+    else:
+        t = "✅ Зараз тихо."
+    await update.message.reply_text(f"{CITY_NAME}: {t}")
+
+
+def fmt(iso: str | None) -> str:
+    if not iso:
+        return "—"
+    from zoneinfo import ZoneInfo
+
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Kyiv"))
+    return dt.strftime("%d.%m %H:%M")
+
+
+async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    rows = get_log(10)
+    if not rows:
+        await update.message.reply_text("Журнал порожній.")
+        return
+    lines = [
+        f"{'🚀' if r['ballistic'] else '🚨'} {fmt(r['started_at'])} → {fmt(r['ended_at']) if r['ended_at'] else 'триває'}"
+        for r in rows
+    ]
+    await update.message.reply_text("Останні тривоги:\n" + "\n".join(lines))
+
+
+# ---------- Веб ----------
+def get_log(limit=50):
+    return [dict(r) for r in db.execute("SELECT * FROM alerts ORDER BY started_at DESC LIMIT ?", (limit,))]
+
+
+async def h_index(_):
+    return web.FileResponse(BASE / "index.html")
+
+
+async def h_sound(_):
+    return web.FileResponse(BASE / "alarm.mp3")
+
+
+async def h_status(_):
+    return web.json_response({**state, "city": CITY_NAME})
+
+
+async def h_log(_):
+    return web.json_response(get_log(50))
+
+
+async def main():
+    global tg_app
+    if not ALERTS_TOKEN:
+        log.warning("ALERTS_TOKEN не задано!")
+
+    web_app = web.Application()
+    web_app.add_routes(
+        [
+            web.get("/", h_index),
+            web.get("/alarm.mp3", h_sound),
+            web.get("/api/status", h_status),
+            web.get("/api/log", h_log),
+        ]
+    )
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    log.info("web on :%s", PORT)
+
+    if BOT_TOKEN:
+        tg_app = Application.builder().token(BOT_TOKEN).build()
+        tg_app.add_handler(CommandHandler("start", cmd_start))
+        tg_app.add_handler(CommandHandler("stop", cmd_stop))
+        tg_app.add_handler(CommandHandler("status", cmd_status))
+        tg_app.add_handler(CommandHandler("log", cmd_log))
+        await tg_app.initialize()
+        await tg_app.start()
+        await tg_app.updater.start_polling()
+    else:
+        log.warning("BOT_TOKEN не задано — працює тільки веб.")
+
+    async with ClientSession(timeout=ClientTimeout(total=15)) as session:
+        await poller(session)
+
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_bot_background, daemon=True)
-    t.start()
-
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    asyncio.run(main())
