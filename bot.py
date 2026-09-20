@@ -36,7 +36,6 @@ def send_telegram_message(text):
         print(f"Помилка ТГ: {e}")
 
 async def spam_ballistic_alarm():
-    """Екстрений спам кожну секунду протягом 15 секунд ТІЛЬКИ для балістики"""
     print("Запуск екстреного спаму повідомлень про балістику...")
     for i in range(15):
         send_telegram_message(f"🚨 **УВАГА! БАЛІСТИКА НА КАМ'ЯНСЬКЕ!** 🚨 Терміново в укриття! ({i+1}/15)")
@@ -69,14 +68,12 @@ def alert_checker_loop():
                     add_log("🚨 Балістична загроза у Кам'янському!", "ballistic")
                     if not last_ballistic_state:
                         last_ballistic_state = True
-                        # Запускаємо екстрений спам для балістики
                         asyncio.run(spam_ballistic_alarm())
                 elif is_uav:
                     current_alert_status = "uav"
                     last_ballistic_state = False
                     if not last_uav_state:
                         last_uav_state = True
-                        # Одне єдине повідомлення про БПЛА / звичайну тривогу
                         add_log("⚠️ Повітряна тривога / Загроза БПЛА в регіоні", "uav")
                         send_telegram_message("⚠️ **Повітряна тривога / Загроза БПЛА** у Кам'янському регіоні.")
                 else:
@@ -105,6 +102,24 @@ def status():
         "current_status": current_alert_status,
         "logs": logs_history
     })
+
+# --- ТЕСТОВИЙ МАРШРУТ ДЛЯ ПЕРЕВІРКИ БАЛІСТИКИ ---
+@app.route('/test-ballistic')
+def test_ballistic():
+    global current_alert_status
+    current_alert_status = "ballistic"
+    add_log("🚨 ТЕСТОВА Балістична загроза у Кам'янському!", "ballistic")
+    # Запускаємо спам у Telegram
+    asyncio.run(spam_ballistic_alarm())
+    return "Тестова балістика активана! Перевірте Телеграм та сайт."
+
+# --- ТЕСТОВИЙ МАРШРУТ ДЛЯ ВІДБОЮ ---
+@app.route('/test-normal')
+def test_normal():
+    global current_alert_status
+    current_alert_status = "normal"
+    add_log("✅ Тестовий відбій тривоги", "normal")
+    return "Статус скинуто до 'Спокійно'."
 
 def run_bot_background():
     alert_checker_loop()
