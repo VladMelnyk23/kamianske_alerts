@@ -136,6 +136,7 @@ def is_district(a: dict) -> bool:
     )
 
 
+# Запасний варіант — на випадок якщо API поверне старий формат без "threats"
 BALLISTIC_KEYWORDS = (
     "ballistic",
     "балістик",
@@ -144,8 +145,22 @@ BALLISTIC_KEYWORDS = (
     "аеробалістич",
 )
 
+# Типи загроз, що officially рахуються балістичними/аеробалістичними/високошвидкісними цілями
+# (значення поля threats[].threat_type за офіційною документацією devs.alerts.in.ua)
+BALLISTIC_THREAT_TYPES = {"ballistic_missiles"}
+
 
 def is_ballistic(a: dict) -> bool:
+    """Балістична/аеробалістична загроза чи високошвидкісна ціль.
+
+    Основне джерело — структуроване поле threats[].threat_type, яке API
+    повертає ОКРЕМО від notes (notes — це довільний коментар джерела,
+    типу "За повідомленням голови ОВА", і НЕ описує тип загрози).
+    """
+    threats = a.get("threats") or []
+    if any(t.get("threat_type") in BALLISTIC_THREAT_TYPES for t in threats):
+        return True
+    # Резерв на випадок старого формату відповіді без "threats"
     text = norm(a.get("alert_type")) + " " + norm(a.get("notes"))
     return any(kw in text for kw in BALLISTIC_KEYWORDS)
 
@@ -185,14 +200,37 @@ THREAT_KEYWORDS = [
     ("артилер", "Артобстріл"),
 ]
 
+# Мітки за структурованим threat_type (пріоритетне джерело, точніше за текстовий пошук)
+THREAT_TYPE_LABELS = {
+    "ballistic_missiles": "Балістика",
+    "cruise_missiles": "Крилаті ракети",
+    "unspecified_missiles": "Ракети",
+    "drones": "БпЛА",
+    "guided_aerial_bombs": "КАБи",
+    "tactic_aircraft_activity": "Тактична авіація",
+    "strategic_aircraft_activity": "Стратегічна авіація",
+    "mig31k_departure": "Зліт МіГ-31К",
+    "air_defense": "Протиповітряна оборона",
+}
+
 
 def threat_labels(a: dict) -> list[str]:
-    text = norm(a.get("notes"))
-    out = ["Балістика/аеробалістика"] if is_ballistic(a) else []
-    for kw, label in THREAT_KEYWORDS:
-        if kw in text and label not in out:
+    """Мітки типів загрози: спершу зі структурованого threats[], і лише якщо
+    його немає — резервний пошук ключових слів у тексті notes."""
+    out = []
+    for t in (a.get("threats") or []):
+        label = THREAT_TYPE_LABELS.get(t.get("threat_type"))
+        if label and label not in out:
             out.append(label)
-    return out
+    if out:
+        return out
+
+    text = norm(a.get("notes"))
+    fallback = ["Балістика/аеробалістика"] if is_ballistic(a) else []
+    for kw, label in THREAT_KEYWORDS:
+        if kw in text and label not in fallback:
+            fallback.append(label)
+    return fallback
 
 
 def describe(a: dict) -> str:
@@ -996,7 +1034,7 @@ async def h_test(request: web.Request):
     if not TEST_KEY:
         return web.json_response({"error": "Задайте змінну TEST_KEY у Railway"}, status=403)
     q = request.query
-    if q.get("key") != TEST_KEY:
+    if not hmac.compare_digest((q.get("key") or "").encode(), TEST_KEY.encode()):
         return web.json_response({"error": "Невірний key"}, status=403)
     kind = q.get("type", "alert")
     if kind == "off":
