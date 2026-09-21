@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Тривога">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
 <title>Тривога — Кам'янське</title>
 <style>
   :root { --bg:#0d1117; --card:#161b22; --text:#e6edf3; --muted:#8b949e; --ok:#238636; --warn:#d29922; --bad:#da3633; --line:#30363d; }
@@ -35,12 +42,16 @@
   tr.other td { color:var(--muted); }
   label.muted { display:block; margin:0 0 10px; }
   .wrap { overflow-x:auto; }
+  [hidden] { display:none !important; }
+  .stale { background:#3d3000; border:1px solid #e3b100; border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:.9rem; }
+  .hint { color:var(--muted); font-size:.82rem; line-height:1.4; margin:6px 0 4px; }
   .muted { color:var(--muted); font-size:.85rem; }
 </style>
 </head>
 <body>
 <main>
   <h1>Моніторинг тривог · <span id="city">Кам'янське</span></h1>
+  <div class="stale" id="stale" hidden>⚠️ Немає свіжих даних: браузер призупинив сторінку або пропав зв'язок. Поверніться на вкладку — вона оновиться.</div>
   <div id="status" class="status">
     <div class="big" id="big">Завантаження…</div>
     <div class="sub" id="sub"></div>
@@ -48,7 +59,20 @@
   <div class="pill" id="district"></div>
   <button id="soundBtn">🔇 Увімкнути звук</button>
   <button id="testBtn">▶ Перевірити звук</button>
+  <label class="muted"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
   <div class="muted" id="soundMsg"></div>
+  <div class="muted" id="health"></div>
+  <details class="hint">
+    <summary>Налаштування Microsoft Edge для постійної роботи</summary>
+    <ol>
+      <li><b>Сон вкладок:</b> <code>edge://settings/system</code> → «Заощаджуйте ресурси за допомогою вкладок у режимі сну» → вимкніть, або додайте цей сайт у «Ніколи не переводити ці сайти в режим сну».</li>
+      <li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту (тоді звук відновлюється сам після перезавантаження).</li>
+      <li><b>Сповіщення:</b> значок замка в адресному рядку → Сповіщення → Дозволити.</li>
+      <li><b>Режим ефективності:</b> вимкніть для цього ноутбука/ПК на живленні, а в Windows не давайте йому засинати.</li>
+      <li>Найстабільніше: Edge → «Програми» → «Установити цей сайт як програму» і працювати у вікні застосунку. На вкладці з'явиться значок 🔊 — так і має бути.</li>
+    </ol>
+  </details>
+  <div class="hint">Натисніть «Увімкнути звук» один раз: це вмикає звук сирени й режим фонової роботи (сторінка тихо тримає аудіосесію, щоб браузер її не призупиняв). Можна згорнути браузер, але не закривайте вкладку. На iPhone надійніше додати сторінку на екран «Додому» (Поділитись → На початковий екран).</div>
   <div class="muted" id="updated"></div>
 
   <h2>Журнал тривог і загроз</h2>
@@ -69,49 +93,190 @@ const dur = (a, b) => {
   return m >= 60 ? `${Math.floor(m/60)} год ${m%60} хв` : `${m} хв`;
 };
 
-const audio = new Audio('/alarm.mp3');
-audio.preload = 'auto';
-let soundOn = false, cur = 'ok', playedFor = null;
+// ---------- Звук і фонова робота ----------
+// Один <audio>-елемент: або тиша (тримає аудіосесію живою у фоні), або сирена.
+// Chromium/Edge не присипляють вкладку, яка "грає звук". Абсолютна тиша за такий звук не вважається,
+// тому граємо ледь чутний тон 50 Гц (~-58 dBFS): на слух практично непомітний, але для браузера це звук.
+// Якщо на дуже гучних колонках чути легкий гул — зменште KEEPALIVE_AMPLITUDE (мінімум ~10).
+const KEEPALIVE_AMPLITUDE = 40; // з 32767
+function silentWavUrl() {
+  const rate = 8000, n = rate; // рівно 1 секунда = 50 періодів, тож повтор без клацань
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.round(KEEPALIVE_AMPLITUDE * Math.sin(2 * Math.PI * 50 * i / rate)), true);
+  return URL.createObjectURL(new Blob([buf], {type: 'audio/wav'}));
+}
+
+// Сигнал «втрачено зв'язок»: три коротких гудки 880 Гц
+function beepUrl() {
+  const rate = 8000, n = Math.round(rate * 1.4);
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const t = i / rate, phase = t % 0.45;                  // гудок 0.25 с + пауза 0.2 с
+    const on = phase < 0.25 && t < 1.35;
+    v.setInt16(44 + i * 2, on ? Math.round(14000 * Math.sin(2 * Math.PI * 880 * t)) : 0, true);
+  }
+  return URL.createObjectURL(new Blob([buf], {type: 'audio/wav'}));
+}
+
+const SILENCE = silentWavUrl();
+const BEEP = beepUrl();
+const player = new Audio();
+player.preload = 'auto';
+player.setAttribute('playsinline', '');
+let soundOn = false, cur = 'ok', prevD = 'ok', playedFor = null, mode = null, blocked = false;
+let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0;
 const btn = document.getElementById('soundBtn');
 const testBtn = document.getElementById('testBtn');
 const msg = document.getElementById('soundMsg');
+const wakeChk = document.getElementById('wakeChk');
+const staleEl = document.getElementById('stale');
 
-audio.addEventListener('error', () => {
-  msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
+function onPlayError(e) {
+  if (e && e.name === 'NotAllowedError') {
+    blocked = true;
+    msg.textContent = 'Браузер заблокував звук. Торкніться екрана або натисніть кнопку «Увімкнути звук».';
+  } else {
+    msg.textContent = 'Відтворення не вдалося: ' + (e && e.name) + ' ' + (e && e.message || '');
+  }
+}
+
+function playSilence() {
+  if (mode !== 'silence') { player.src = SILENCE; mode = 'silence'; }
+  player.loop = true;
+  return player.play();
+}
+
+function playSiren(loop) {
+  player.src = '/alarm.mp3';
+  mode = 'siren';
+  player.loop = loop;
+  return player.play();
+}
+
+// Сигнал втрати зв'язку (не перебиває сирену)
+function playBeep() {
+  if (!soundOn || blocked || cur !== 'ok' || mode === 'siren') return;
+  player.src = BEEP; mode = 'beep'; player.loop = false;
+  player.play().catch(onPlayError);
+}
+
+player.addEventListener('error', () => {
+  if (mode === 'siren') msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
+});
+// Сирена без повтору закінчилась -> повертаємось до тиші, щоб сесія не завмерла
+player.addEventListener('ended', () => {
+  if (soundOn) { mode = null; playSilence().catch(onPlayError); }
 });
 
-function tryPlay(loop) {
-  audio.loop = loop;
-  audio.currentTime = 0;
-  const p = audio.play();
-  if (p) p.then(() => { msg.textContent = ''; })
-          .catch(e => { msg.textContent = 'Відтворення не вдалося: ' + e.name + ' ' + e.message; });
-}
-
 function syncSound() {
-  if (cur === 'ok') { playedFor = null; audio.pause(); return; }
-  if (!soundOn) { audio.pause(); return; }
-  if (playedFor !== cur) { playedFor = cur; tryPlay(cur === 'ballistic'); }
+  if (!soundOn) return;
+  if (cur === 'ok') {
+    playedFor = null;
+    if (mode === 'siren') playSilence().catch(onPlayError);
+    return;
+  }
+  if (playedFor !== cur) {
+    playedFor = cur;
+    playSiren(cur === 'ballistic').then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
+  }
 }
 
+// Аудіо могло бути перервано системою (дзвінок, блокування) — відновлюємо
+function resumeAudio() {
+  if (!soundOn) return;
+  if (player.paused || blocked) {
+    blocked = false;
+    playedFor = null;
+    mode = null;
+    playSilence().then(syncSound).catch(onPlayError);
+  }
+}
+
+// ---------- Не гасити екран ----------
+async function acquireWake() {
+  try {
+    if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch (e) {}
+}
+function releaseWake() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
+
+// ---------- Системні сповіщення, вібрація, заголовок вкладки ----------
+function notify(title, body) {
+  try {
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+      new Notification(title, {body, tag: 'alarm', renotify: true, requireInteraction: true});
+    }
+  } catch (e) {}
+  try { if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 800]); } catch (e) {}
+}
+
+function updateTitle(text, artist) {
+  document.title = text;
+  try {
+    if ('mediaSession' in navigator && window.MediaMetadata) {
+      navigator.mediaSession.metadata = new MediaMetadata({title: 'Моніторинг тривог', artist});
+    }
+  } catch (e) {}
+}
+
+// ---------- Кнопки ----------
 btn.onclick = () => {
   soundOn = !soundOn;
   btn.classList.toggle('on', soundOn);
   btn.textContent = soundOn ? '🔊 Звук увімкнено' : '🔇 Увімкнути звук';
   playedFor = null;
-  if (soundOn) syncSound(); else audio.pause();
+  try { localStorage.setItem('soundOn', soundOn ? '1' : '0'); } catch (e) {}
+  if (soundOn) {
+    // Перший play() має бути прямо в обробнику кліку (вимога iOS/Safari)
+    playSilence().then(() => { msg.textContent = ''; blocked = false; syncSound(); }).catch(onPlayError);
+    if (wakeChk.checked) acquireWake();
+    try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {}
+  } else {
+    player.pause(); mode = null; releaseWake();
+  }
 };
+
+wakeChk.onchange = () => { if (soundOn) { if (wakeChk.checked) acquireWake(); else releaseWake(); } };
 
 testBtn.onclick = () => {
-  tryPlay(false);
-  setTimeout(() => { if (cur === 'ok' || !soundOn) audio.pause(); }, 4000);
+  playSiren(false).then(() => { msg.textContent = ''; }).catch(onPlayError);
+  setTimeout(() => {
+    if (cur !== 'ok') return;
+    if (soundOn) playSilence().catch(onPlayError); else { player.pause(); mode = null; }
+  }, 4000);
 };
 
+// Торкання екрана відновлює заблокований звук
+document.addEventListener('pointerdown', () => { if (blocked) resumeAudio(); });
+
+// ---------- Статус ----------
 async function loadStatus() {
   const box = document.getElementById('status'), big = document.getElementById('big'), sub = document.getElementById('sub');
   try {
-    const s = await (await fetch('/api/status')).json();
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);   // зависший запит не має блокувати перевірку
+    let s;
+    try {
+      const r = await fetch('/api/status', {cache: 'no-store', signal: ctl.signal});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      s = await r.json();
+    } finally { clearTimeout(timer); }
+    lastOk = Date.now();
     document.getElementById('city').textContent = s.city;
+    const prev = cur;
     cur = 'ok';
     if (s.ballistic) cur = 'ballistic'; else if (s.active) cur = 'alert';
     box.className = 'status ' + (s.test ? 'test' : (cur === 'ok' ? '' : cur));
@@ -120,14 +285,22 @@ async function loadStatus() {
     else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
     if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
     if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
+
     const d = s.district || {};
     const dEl = document.getElementById('district');
+    const dk = d.ballistic ? 'ballistic' : d.active ? 'alert' : 'ok';
     if (d.name) {
-      dEl.className = 'pill ' + (d.ballistic ? 'ballistic' : d.active ? 'alert' : '');
-      dEl.textContent = d.name + ': ' + (d.ballistic ? '🔴 балістична загроза' : d.active ? '🟡 повітряна тривога' : '🟢 тихо');
+      dEl.className = 'pill ' + (dk === 'ok' ? '' : dk);
+      dEl.textContent = d.name + ': ' + (dk === 'ballistic' ? '🔴 балістична загроза' : dk === 'alert' ? '🟡 повітряна тривога' : '🟢 тихо');
+      if (dk !== prevD && dk !== 'ok') notify(d.name, dk === 'ballistic' ? 'Балістична загроза' : 'Повітряна тривога');
+      prevD = dk;
     }
-    document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
 
+    const label = cur === 'ballistic' ? '🔴 БАЛІСТИКА' : cur === 'alert' ? '🟡 ТРИВОГА' : '🟢 Тихо';
+    updateTitle((s.test ? '🔵 ТЕСТ · ' : '') + label + ' · ' + s.city, label);
+    if (cur !== prev && cur !== 'ok') notify(s.city, cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!');
+
+    document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
     syncSound();
   } catch (e) {
     box.className = 'status error';
@@ -168,9 +341,95 @@ async function loadLog() {
   } catch (e) {}
 }
 
-loadStatus(); loadLog();
-setInterval(loadStatus, 10000);
-setInterval(loadLog, 30000);
+// ---------- Опитування: Web Worker-таймер не так гальмується у фоні, як setInterval ----------
+function startTicker(fn, ms) {
+  try {
+    const blob = new Blob(['setInterval(function(){postMessage(1)},' + ms + ')'], {type: 'text/javascript'});
+    const w = new Worker(URL.createObjectURL(blob));
+    w.onmessage = fn;
+    return;
+  } catch (e) {}
+  setInterval(fn, ms);
+}
+
+function refreshAll() { loadStatus(); loadLog(); }
+
+let tick = 0;
+startTicker(() => {
+  tick++;
+  loadStatus();
+  if (tick % 6 === 0) loadLog();
+  const age = Date.now() - lastOk;
+  staleEl.hidden = age < 30000;
+  // Сторінка жива, але даних немає: звуковий сигнал раз на 2 хвилини після першої хвилини тиші
+  if (age > 60000 && Date.now() - lastBeep > 120000) { lastBeep = Date.now(); playBeep(); }
+  // Довго немає даних: якщо сервер доступний, перезавантажуємо сторінку (не частіше разу на 10 хв)
+  if (age > 180000) tryReload();
+  renderHealth();
+}, 5000);
+
+// Повернення на вкладку / розблокування / відновлення мережі — оновлюємось одразу
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    if (soundOn && wakeChk.checked) acquireWake();
+    resumeAudio();
+    refreshAll();
+  }
+});
+window.addEventListener('pageshow', refreshAll);
+window.addEventListener('focus', refreshAll);
+window.addEventListener('online', refreshAll);
+
+function tryReload() {
+  try {
+    const last = +(sessionStorage.getItem('lastReload') || 0);
+    if (Date.now() - last < 600000) return;
+    // Перезавантажуємо лише якщо сервер відповідає, щоб не залишитись зі сторінкою-помилкою браузера
+    fetch('/', {cache: 'no-store'}).then(r => {
+      if (r.ok) { sessionStorage.setItem('lastReload', String(Date.now())); location.reload(); }
+    }).catch(() => {});
+  } catch (e) {}
+}
+
+// Web Lock: браузер не заморожує сторінку, яка тримає блокування
+function holdLock() {
+  try {
+    if (navigator.locks) {
+      navigator.locks.request('alarm-keepalive', () => new Promise(() => {}));
+      lockOn = true;
+    }
+  } catch (e) {}
+}
+
+function renderHealth() {
+  const parts = [];
+  parts.push('звук: ' + (!soundOn ? 'вимкнено' : (player.paused ? '⚠️ не грає' : '✓ активний')));
+  parts.push('екран: ' + (wakeLock ? '✓' : (soundOn && wakeChk.checked ? '⚠️' : '—')));
+  parts.push('захист від сну: ' + (lockOn ? '✓' : '—'));
+  const age = Math.round((Date.now() - lastOk) / 1000);
+  parts.push('дані: ' + (age < 15 ? '✓ свіжі' : '⚠️ ' + age + ' с тому'));
+  document.getElementById('health').textContent = 'Фоновий режим — ' + parts.join(' · ');
+}
+
+// Page Lifecycle: якщо браузер таки заморозив сторінку — після розморожування одразу оновлюємось
+document.addEventListener('resume', () => { resumeAudio(); refreshAll(); });
+
+holdLock();
+
+// Після перезавантаження/відновлення вкладки самі вмикаємо звук, якщо він був увімкнений
+// (спрацює автоматично, якщо в Edge дозволено автозвук для сайту; інакше — один дотик до екрана)
+try {
+  if (localStorage.getItem('soundOn') === '1') {
+    soundOn = true;
+    btn.classList.add('on');
+    btn.textContent = '🔊 Звук увімкнено';
+    playSilence().then(() => { blocked = false; msg.textContent = ''; syncSound(); }).catch(onPlayError);
+    if (wakeChk.checked) acquireWake();
+  }
+} catch (e) {}
+
+renderHealth();
+refreshAll();
 </script>
 </body>
 </html>
