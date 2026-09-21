@@ -136,9 +136,18 @@ def is_district(a: dict) -> bool:
     )
 
 
+BALLISTIC_KEYWORDS = (
+    "ballistic",
+    "балістик",
+    "високошвидкісних цілей",   # офіційне формулювання alerts.in.ua для балістики/аеробалістики
+    "високошвидкісної цілі",
+    "аеробалістич",
+)
+
+
 def is_ballistic(a: dict) -> bool:
     text = norm(a.get("alert_type")) + " " + norm(a.get("notes"))
-    return "ballistic" in text or "балістик" in text
+    return any(kw in text for kw in BALLISTIC_KEYWORDS)
 
 
 def is_siren(a: dict) -> bool:
@@ -164,6 +173,8 @@ TYPE_LABELS = {
 
 
 THREAT_KEYWORDS = [
+    ("високошвидкісн", "Балістика/аеробалістика"),
+    ("аеробалістич", "Балістика/аеробалістика"),
     ("шахед", "Шахеди"),
     ("бпла", "БпЛА"),
     ("дрон", "БпЛА"),
@@ -177,7 +188,7 @@ THREAT_KEYWORDS = [
 
 def threat_labels(a: dict) -> list[str]:
     text = norm(a.get("notes"))
-    out = ["Балістика"] if is_ballistic(a) else []
+    out = ["Балістика/аеробалістика"] if is_ballistic(a) else []
     for kw, label in THREAT_KEYWORDS:
         if kw in text and label not in out:
             out.append(label)
@@ -303,70 +314,70 @@ GREEN = "🟢✅" * 7    # відбій
 
 def msg_ballistic() -> str:
     return (
-        
+        f"{RED}\n{RED}\n\n"
         f"🚀🚀 БАЛІСТИЧНА ЗАГРОЗА 🚀🚀\n"
         f"📍 {CITY_NAME}\n\n"
         f"❗❗ НЕГАЙНО В УКРИТТЯ! ❗❗\n\n"
-        
+        f"{RED}\n{RED}"
     )
 
 
 def msg_alert(suffix: str = "") -> str:
     return (
-        
+        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
         f"Прямуйте в укриття.\n\n"
-       
+        f"{YELLOW}"
     )
 
 
 def msg_test(label: str) -> str:
     return (
-       
+        f"{BLUE}\n\n"
         f"🧪 ТЕСТ: {label} 🧪\n"
         f"📍 {CITY_NAME}\n\n"
         f"Це перевірка, реальної загрози немає.\n\n"
-        
+        f"{BLUE}"
     )
 
 
 def msg_ballistic_clear() -> str:
     return (
-       
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"🟡 Повітряна тривога триває — залишайтесь в укритті.\n\n"
-        
+        f"{GREEN}"
     )
 
 
 def msg_district_ballistic_clear() -> str:
     return (
-       
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"🟡 Повітряна тривога в районі триває.\n\n"
-       
+        f"{GREEN}"
     )
 
 
 def msg_test_clear() -> str:
     return (
-      
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ (ТЕСТ) ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"Тестову перевірку завершено.\n\n"
-      
+        f"{GREEN}"
     )
 
 
 def msg_clear() -> str:
     return (
-        
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
-       
+        f"{GREEN}"
     )
 
 
@@ -382,30 +393,30 @@ def kam_line() -> str:
 
 def msg_district_alert() -> str:
     return (
-       
+        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"{kam_line()}\n\n"
-        
+        f"{YELLOW}"
     )
 
 
 def msg_district_ballistic() -> str:
     return (
-        
+        f"{RED}\n\n"
         f"🚀🚀 БАЛІСТИКА — {DISTRICT_NAME.upper()} 🚀🚀\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"{kam_line()}\n\n"
-        
+        f"{RED}"
     )
 
 
 def msg_district_clear() -> str:
     return (
-        
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
-       
+        f"{GREEN}"
     )
 
 
@@ -490,7 +501,7 @@ def process(mine: list[dict]):
 
 
 def process_district(mine: list[dict]):
-    """Журнал і повідомлення по Дніпровському районі (без сирени на сторінці)."""
+    """Журнал і повідомлення по Дніпровському району (без сирени на сторінці)."""
     was_active = bool(d_open)
     was_ballistic = any(d_open.values())
     current = {a["id"]: a for a in mine}
