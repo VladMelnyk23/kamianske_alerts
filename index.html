@@ -71,14 +71,6 @@
     color:#e6c563; border-radius:12px; padding:11px 13px; margin:0 0 12px; font-size:.86rem; line-height:1.4;
   }
 
-  /* ---------- District pill ---------- */
-  .pill {
-    display:inline-flex; align-items:center; gap:6px; margin-top:14px; padding:7px 14px; border-radius:999px;
-    background:var(--card); border:1px solid var(--border); font-size:.85rem; color:var(--dim);
-  }
-  .pill.alert { border-color:#5c4a08; color:var(--warn); }
-  .pill.ballistic { border-color:#7a1520; color:#ff8794; }
-
   /* ---------- Controls ---------- */
   .controls { display:flex; gap:10px; margin:18px 0 6px; flex-wrap:wrap; }
   button {
@@ -164,7 +156,6 @@
     <div class="big" id="big">Завантаження…</div>
     <div class="sub" id="sub"></div>
   </div>
-  <div class="pill" id="district"></div>
 
   <div class="controls">
     <button id="soundBtn">🔇 Увімкнути звук</button>
@@ -252,7 +243,7 @@ const ALARM_SRC = '/alarm.mp3';
 const player = new Audio();
 player.preload = 'auto';
 player.setAttribute('playsinline', '');
-let soundOn = false, cur = 'ok', prevD = 'ok', playedFor = null, mode = null, blocked = false;
+let soundOn = false, cur = 'ok', playedFor = null, mode = null, blocked = false;
 let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0, srcError = null, srcUpdated = null;
 // playToken серіалізує перемикання джерела: зміна src обриває попередній play() з AbortError,
 // testUntil захищає ручну перевірку звуку від фонових перевірок (syncSound / resumeAudio / playBeep).
@@ -315,25 +306,43 @@ player.addEventListener('error', () => {
     msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
   }
 });
-// Сирена без повтору закінчилась -> повертаємось до тиші, щоб сесія не завмерла
+// Сирена без повтору закінчилась -> повертаємось до тиші, щоб сесія не завмерла.
+// Якщо балістика ще триває — одразу піднімаємо сирену знову.
 player.addEventListener('ended', () => {
-  if (soundOn) playSilence().catch(onPlayError); else mode = null;
+  if (!soundOn) { mode = null; return; }
+  if (cur === 'ballistic' && Date.now() >= testUntil) { playedFor = null; syncSound(); return; }
+  playSilence().catch(onPlayError);
 });
+
+let lastSirenFix = 0;
 
 function syncSound() {
   if (!soundOn) return;
   if (Date.now() < testUntil) return;   // йде ручна перевірка — не чіпаємо плеєр
-  // Сирена лунає лише при балістичній загрозі. Звичайна повітряна тривога
-  // (cur === 'alert') і стан 'ok' лишають фонову тишу — тільки колір/текст/сповіщення міняються.
+  // Сирена лунає ТІЛЬКИ при балістичній загрозі й грає безперервно (loop), поки загроза активна.
+  // Повітряна тривога (cur === 'alert') і стан 'ok' — фонова тиша: міняються лише колір,
+  // текст на головній і системне сповіщення, звуку немає.
   if (cur !== 'ballistic') {
     playedFor = null;
     if (mode === 'siren') playSilence().catch(onPlayError);
     return;
   }
-  if (playedFor !== cur) {
+  if (playedFor !== cur || mode !== 'siren') {
     playedFor = cur;
+    lastSirenFix = Date.now();
     playSiren(true).then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
   }
+}
+
+// Сторож: балістика триває, а сирена чомусь замовкла (система перервала, джерело не догрузилось) — піднімаємо.
+function ensureSiren() {
+  if (!soundOn || blocked || cur !== 'ballistic') return;
+  if (Date.now() < testUntil) return;
+  if (mode === 'siren' && !player.paused) return;
+  if (Date.now() - lastSirenFix < 10000) return;   // даємо час на завантаження, не смикаємо src щотіка
+  lastSirenFix = Date.now();
+  playedFor = null;
+  syncSound();
 }
 
 // Аудіо могло бути перервано системою (дзвінок, блокування) — відновлюємо
@@ -363,12 +372,14 @@ async function acquireWake() {
 function releaseWake() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
 
 // ---------- Системні сповіщення, вібрація, заголовок вкладки ----------
-function notify(title, body) {
+// loud=true лише для балістики: повітряна тривога приходить беззвучним сповіщенням, без вібрації
+function notify(title, body, loud) {
   try {
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-      new Notification(title, {body, tag: 'alarm', renotify: true, requireInteraction: true});
+      new Notification(title, {body, tag: 'alarm', renotify: true, requireInteraction: true, silent: !loud});
     }
   } catch (e) {}
+  if (!loud) return;
   try { if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 800]); } catch (e) {}
 }
 
@@ -440,19 +451,12 @@ async function loadStatus() {
     if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
     if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
 
-    const d = s.district || {};
-    const dEl = document.getElementById('district');
-    const dk = d.ballistic ? 'ballistic' : d.active ? 'alert' : 'ok';
-    if (d.name) {
-      dEl.className = 'pill ' + (dk === 'ok' ? '' : dk);
-      dEl.textContent = d.name + ': ' + (dk === 'ballistic' ? '🔴 балістична загроза' : dk === 'alert' ? '🟡 повітряна тривога' : '🟢 тихо');
-      if (dk !== prevD && dk !== 'ok') notify(d.name, dk === 'ballistic' ? 'Балістична загроза' : 'Повітряна тривога');
-      prevD = dk;
-    }
+    // Дніпровський район свідомо не виводиться на головний екран —
+    // ці події лишаються лише в журналі нижче.
 
     const label = cur === 'ballistic' ? '🔴 БАЛІСТИКА' : cur === 'alert' ? '🟡 ТРИВОГА' : '🟢 Тихо';
     updateTitle((s.test ? '🔵 ТЕСТ · ' : '') + label + ' · ' + s.city, label);
-    if (cur !== prev && cur !== 'ok') notify(s.city, cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!');
+    if (cur !== prev && cur !== 'ok') notify(s.city, cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!', cur === 'ballistic');
 
     srcError = s.error || null;
     srcUpdated = s.updated || null;
@@ -529,6 +533,7 @@ startTicker(() => {
   if (age > 60000 && Date.now() - lastBeep > 120000) { lastBeep = Date.now(); playBeep(); }
   // Довго немає даних: якщо сервер доступний, перезавантажуємо сторінку (не частіше разу на 10 хв)
   if (age > 180000) tryReload();
+  ensureSiren();
   renderHealth();
 }, 5000);
 
@@ -667,5 +672,4 @@ refreshAll();
 sendHeartbeat();
 </script>
 </body>
-</html>
 </html>
