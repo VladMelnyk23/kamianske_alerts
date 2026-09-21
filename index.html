@@ -2,7 +2,7 @@
 <html lang="uk">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0d1117">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -12,242 +12,92 @@
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <title>Тривога — Кам'янське</title>
 <style>
-  /* ============ Дизайн-система ============
-     Шрифти: 5 розмірів. Відступи: кратні 4px. Кольори: семантичні (ok / bad / warn / info). */
-  :root {
-    /* поверхні й текст */
-    --bg:#0d1117; --surface:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e;
-    /* семантика */
-    --ok:#3fb950;   --ok-bg:rgba(63,185,80,.12);   --ok-line:#238636;
-    --bad:#ff7b72;  --bad-bg:rgba(248,81,73,.12);  --bad-line:#da3633;
-    --warn:#e3b100; --warn-bg:rgba(227,177,0,.12); --warn-line:#9e7c00;
-    --info:#58a6ff; --info-bg:rgba(56,139,253,.14); --info-line:#1f6feb;
-    /* колір великого блоку статусу */
-    --st-quiet:#238636; --st-alert:#e3b100; --st-ballistic:#e5202a; --st-test:#1f6feb; --st-error:#4d4d4d;
-    /* шкала */
-    --fs-xs:.75rem; --fs-sm:.875rem; --fs-md:1rem; --fs-lg:1.25rem; --fs-xl:2rem;
-    --gap:16px; --pad:16px; --radius:14px; --radius-sm:10px;
-    --tap:44px; /* мінімальний розмір елемента для дотику */
-    color-scheme:dark;
-  }
-  html { -webkit-text-size-adjust:100%; }
+  :root { --bg:#0d1117; --card:#161b22; --text:#e6edf3; --muted:#8b949e; --ok:#238636; --warn:#d29922; --bad:#da3633; --line:#30363d; }
   * { box-sizing:border-box; }
-  [hidden] { display:none !important; }
-  body { margin:0; min-height:100vh; min-height:100dvh; -webkit-tap-highlight-color:transparent; background:var(--bg); color:var(--text); font:var(--fs-md)/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  h1, h2, p { margin:0; }
-  .muted { color:var(--muted); }
-  .err { color:var(--bad); }
-
-  /* ============ Компоненти ============ */
-  .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:var(--pad); }
-  .card h2 { font-size:var(--fs-sm); font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:12px; }
-  .note { font-size:var(--fs-sm); color:var(--muted); margin-top:12px; }
-
-  .btn { font:inherit; font-size:var(--fs-sm); font-weight:500; min-height:var(--tap); padding:10px 16px; touch-action:manipulation; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--bg); color:var(--text); cursor:pointer; }
-  .btn:hover { border-color:var(--muted); }
-  .btn:disabled { opacity:.45; cursor:not-allowed; }
-  .btn.primary { background:var(--info-line); border-color:var(--info-line); color:#fff; }
-  .btn.primary.on { background:var(--ok-bg); border-color:var(--ok-line); color:var(--ok); }
-  .btn.block { display:block; width:100%; }
-  .link { font:inherit; font-size:var(--fs-sm); background:none; border:0; padding:8px 4px; min-height:var(--tap); color:var(--info); cursor:pointer; touch-action:manipulation; }
-  .link:hover { text-decoration:underline; }
-
-  .input { width:100%; font:inherit; padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--bg); color:var(--text); }
-  .input:focus { outline:2px solid var(--info-line); border-color:transparent; }
-  .check { display:flex; align-items:center; gap:10px; min-height:var(--tap); font-size:var(--fs-sm); color:var(--muted); cursor:pointer; }
-  .check input { width:20px; height:20px; flex:none; accent-color:var(--info-line); }
-
-  .chip { display:inline-block; padding:4px 10px; border-radius:999px; font-size:var(--fs-xs); border:1px solid; white-space:nowrap; }
-  .chip.ok  { color:var(--ok);  border-color:var(--ok-line);  background:var(--ok-bg); }
-  .chip.bad { color:var(--bad); border-color:var(--bad-line); background:var(--bad-bg); }
-  .chip.off { color:var(--muted); border-color:var(--line); }
-
-  /* ============ Екран введення назви ============ */
-  .gate { min-height:100vh; min-height:100dvh; display:flex; align-items:center; justify-content:center;
-          padding:max(var(--pad), env(safe-area-inset-top)) max(var(--pad), env(safe-area-inset-right)) max(var(--pad), env(safe-area-inset-bottom)) max(var(--pad), env(safe-area-inset-left)); }
-  .gate-card { width:100%; max-width:400px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:32px 24px; }
-  .gate-card h1 { font-size:var(--fs-lg); margin-bottom:8px; }
-  .gate-icon { font-size:var(--fs-xl); margin-bottom:12px; }
-  .gate-card .lead { color:var(--muted); font-size:var(--fs-sm); margin-bottom:24px; }
-  .field-label { display:block; font-size:var(--fs-sm); font-weight:500; margin-bottom:8px; }
-  .field-error { min-height:20px; margin:8px 0; font-size:var(--fs-sm); color:var(--bad); }
-  .gate-actions { display:grid; gap:8px; }
-
-  /* ============ Головна ============ */
-  .app { max-width:760px; margin:0 auto; display:grid; gap:var(--gap);
-         padding:max(var(--pad), env(safe-area-inset-top)) max(var(--pad), env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(var(--pad), env(safe-area-inset-left)); }
-
-  .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--gap); flex-wrap:wrap; }
-  .brand h1 { font-size:var(--fs-lg); font-weight:600; }
-  .brand .city { font-size:var(--fs-sm); color:var(--muted); }
-  .device { display:flex; align-items:center; gap:8px; font-size:var(--fs-sm); padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:var(--surface); }
-  .device::before { content:"🖥"; }
-  .device-name { font-weight:600; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-  .stale { background:var(--warn-bg); border:1px solid var(--warn-line); color:var(--warn); border-radius:var(--radius-sm); padding:12px var(--pad); font-size:var(--fs-sm); }
-
-  /* великий блок статусу */
-  .status { border-radius:var(--radius); padding:32px var(--pad); text-align:center; background:var(--st-quiet); color:#fff; transition:background .3s; }
-  .status .big { font-size:var(--fs-xl); font-weight:700; line-height:1.2; }
-  .status .sub { margin-top:8px; font-size:var(--fs-md); opacity:.92; }
-  .status.alert { background:var(--st-alert); color:#1a1300; animation:pulse 1.2s infinite; }
-  .status.ballistic { background:var(--st-ballistic); animation:pulse .7s infinite; }
-  .status.test { background:var(--st-test); animation:pulse 1.5s infinite; }
-  .status.error { background:var(--st-error); }
-  @keyframes pulse { 50% { filter:brightness(1.3); } }
-
-  /* статус Кам'янського району */
-  .zone { padding:12px var(--pad); border-radius:var(--radius-sm); border:1px solid var(--ok-line); background:var(--ok-bg); font-size:var(--fs-sm); font-weight:500; }
-  .zone.alert { border-color:var(--warn-line); background:var(--warn-bg); }
-  .zone.ballistic { border-color:var(--bad-line); background:var(--bad-bg); }
-  .zone:empty { display:none; }
-
-  /* звук */
-  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
-  .msg:not(:empty) { margin-top:12px; padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--bad-line); background:var(--bad-bg); color:var(--bad); font-size:var(--fs-sm); }
-
-  /* стан пристрою */
-  .health .htitle { font-size:var(--fs-md); font-weight:600; margin-bottom:12px; }
-  .health.ok .htitle { color:var(--ok); }
-  .health.bad .htitle { color:var(--bad); }
-  .health .chips { display:flex; flex-wrap:wrap; gap:8px; }
-  .updated { margin-top:12px; font-size:var(--fs-xs); color:var(--muted); }
-  .updated.err { color:var(--bad); }
-
-  /* журнал */
-  .card-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
-  .card-head h2 { margin:0; }
-  .wrap { overflow-x:auto; margin:0 calc(var(--pad) * -1); padding:0 var(--pad); }
-  table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
-  th, td { padding:10px 12px 10px 0; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { font-size:var(--fs-xs); font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:1.1rem; color:var(--muted); font-weight:500; margin:0 0 14px; }
+  .status { border-radius:16px; padding:36px 20px; text-align:center; background:var(--ok); transition:background .3s; }
+  .status.alert { background:#e3b100; color:#1a1300; animation:pulse 1.2s infinite; }
+  .status.ballistic { background:#e5202a; animation:pulse .7s infinite; }
+  .status.test { background:#1f6feb; animation:pulse 1.5s infinite; }
+  .status.error { background:#4d4d4d; }
+  .status .big { font-size:2rem; font-weight:700; }
+  .status .sub { margin-top:8px; opacity:.9; }
+  @keyframes pulse { 50% { filter:brightness(1.35); } }
+  button { margin:14px 0; padding:10px 16px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:.95rem; cursor:pointer; }
+  button.on { border-color:var(--ok); }
+  h2 { font-size:1.05rem; margin:26px 0 10px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; font-size:.92rem; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
   tr:last-child td { border-bottom:0; }
-  tr.other td { color:var(--muted); }
-  .tag { display:inline-block; padding:2px 10px; border-radius:999px; font-size:var(--fs-xs); font-weight:600; background:var(--st-alert); color:#1a1300; white-space:nowrap; }
-  .tag.b { background:var(--st-ballistic); color:#fff; }
+  .tag { padding:2px 8px; border-radius:6px; font-size:.8rem; background:var(--warn); color:#000; }
+  .tag.b { background:var(--bad); color:#fff; }
   .tag.o { background:#6e7681; color:#fff; }
-  .tag.t { background:var(--st-test); color:#fff; }
-
-  /* довідка */
-  .help summary { cursor:pointer; font-size:var(--fs-sm); font-weight:600; color:var(--muted); }
-  .help ol { margin:12px 0 0; padding-left:20px; font-size:var(--fs-sm); color:var(--muted); display:grid; gap:8px; }
-  .help code { background:var(--bg); padding:1px 6px; border-radius:6px; }
-
-  /* ============ Мобільні пристрої ============ */
-  @media (max-width:600px) {
-    :root { --pad:14px; --gap:12px; --fs-xl:clamp(1.5rem, 7vw, 1.75rem); }
-    .topbar { flex-direction:column; align-items:stretch; gap:8px; }
-    .device { justify-content:space-between; }
-    .device-name { max-width:60vw; }
-    .status { padding:24px var(--pad); }
-    .btn { flex:1 1 100%; }
-    .actions { flex-direction:column; }
-    .chip { white-space:normal; }
-    .card-head { align-items:flex-start; }
-    .gate-card { padding:24px 20px; }
-
-    /* журнал: таблиця перетворюється на картки */
-    .wrap { margin:0; padding:0; overflow:visible; }
-    table, tbody { display:block; }
-    thead { display:none; }
-    tr { display:grid; grid-template-columns:1fr auto; grid-template-areas:"type dur" "start end" "comment comment"; gap:4px 12px; padding:12px 0; border-bottom:1px solid var(--line); }
-    tr:last-child { border-bottom:0; }
-    td { display:block; padding:0; border:0; }
-    td:nth-child(1) { grid-area:start; }
-    td:nth-child(2) { grid-area:end; text-align:right; }
-    td:nth-child(2)::before { content:"→ "; color:var(--muted); }
-    td:nth-child(3) { grid-area:dur; text-align:right; color:var(--muted); }
-    td:nth-child(4) { grid-area:type; }
-    td:nth-child(5) { grid-area:comment; color:var(--muted); }
-    td:nth-child(5):empty { display:none; }
-    td[colspan] { grid-area:auto; grid-column:1 / -1; }
-    td[colspan]::before { content:none; }
-  }
+  .pill { display:inline-block; margin-top:12px; padding:6px 12px; border-radius:999px; background:var(--card); border:1px solid var(--line); font-size:.9rem; }
+  .pill.alert { border-color:#e3b100; }
+  .pill.ballistic { border-color:#e5202a; }
+  .tag.t { background:#1f6feb; color:#fff; }
+  tr.other td { color:var(--muted); }
+  label.muted { display:block; margin:0 0 10px; }
+  .wrap { overflow-x:auto; }
+  [hidden] { display:none !important; }
+  .stale { background:#3d3000; border:1px solid #e3b100; border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:.9rem; }
+  .health { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); }
+  .health.ok { border-color:#238636; background:rgba(35,134,54,.10); }
+  .health.bad { border-color:#da3633; background:rgba(218,54,51,.12); }
+  .health .htitle { flex:1 0 100%; font-size:.9rem; font-weight:600; }
+  .health.ok .htitle { color:#3fb950; }
+  .health.bad .htitle { color:#ff7b72; }
+  .chip { display:inline-block; padding:4px 10px; border-radius:999px; font-size:.82rem; border:1px solid; white-space:nowrap; }
+  .chip.ok { color:#3fb950; border-color:#238636; background:rgba(35,134,54,.18); }
+  .chip.bad { color:#ff7b72; border-color:#da3633; background:rgba(218,54,51,.18); }
+  .chip.off { color:var(--muted); border-color:var(--line); background:transparent; }
+  #soundMsg:not(:empty) { color:#ff7b72; border:1px solid #da3633; background:rgba(218,54,51,.12); border-radius:10px; padding:8px 10px; margin:8px 0; }
+  .err { color:#ff7b72; }
+  #devName { background:var(--card); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 10px; font-size:.9rem; margin-left:6px; max-width:60vw; }
+  .hint { color:var(--muted); font-size:.82rem; line-height:1.4; margin:6px 0 4px; }
+  .muted { color:var(--muted); font-size:.85rem; }
 </style>
 </head>
 <body>
-
-<!-- Крок 1: обов'язкове введення назви пристрою -->
-<div class="gate" id="gate" hidden>
-  <form class="gate-card" id="gateForm" autocomplete="off">
-    <div class="gate-icon">🚨</div>
-    <h1>Моніторинг тривог</h1>
-    <p class="lead">Вкажіть назву цього пристрою, щоб продовжити. За нею пристрій відображається у списку активних сесій.</p>
-    <label class="field-label" for="gateName">Назва пристрою</label>
-    <input class="input" id="gateName" maxlength="40" placeholder="Напр. Офіс, ПК 1">
-    <div class="field-error" id="gateErr"></div>
-    <div class="gate-actions">
-      <button type="submit" class="btn primary block" id="gateBtn" disabled>Продовжити</button>
-      <button type="button" class="btn block" id="gateCancel" hidden>Скасувати</button>
-    </div>
-    <p class="note">Назва зберігається в цьому браузері. Кожен комп'ютер повинен мати унікальну назву.</p>
-  </form>
-</div>
-
-<!-- Крок 2: головна -->
-<div class="app" id="app" hidden>
-  <header class="topbar">
-    <div class="brand">
-      <h1>Моніторинг тривог</h1>
-      <div class="city" id="city">Кам'янське</div>
-    </div>
-    <div class="device">
-      <span class="device-name" id="devLabel"></span>
-      <button type="button" class="link" id="devChange">Змінити</button>
-    </div>
-  </header>
-
+<main>
+  <h1>Моніторинг тривог · <span id="city">Кам'янське</span></h1>
   <div class="stale" id="stale" hidden>⚠️ Немає свіжих даних: браузер призупинив сторінку або пропав зв'язок. Поверніться на вкладку — вона оновиться.</div>
-
-  <section class="status" id="status" aria-live="polite">
+  <div id="status" class="status">
     <div class="big" id="big">Завантаження…</div>
     <div class="sub" id="sub"></div>
-  </section>
-
-  <div class="zone" id="raion"></div>
-
-  <section class="card">
-    <h2>Звук і фонова робота</h2>
-    <div class="actions">
-      <button class="btn primary" id="soundBtn">🔇 Увімкнути звук</button>
-      <button class="btn" id="testBtn">▶ Перевірити звук</button>
-    </div>
-    <label class="check"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
-    <div class="msg" id="soundMsg"></div>
-    <p class="note">Натисніть «Увімкнути звук» один раз: це вмикає сирену й режим фонової роботи. Браузер можна згорнути, але не закривайте вкладку.</p>
-  </section>
-
-  <section class="card">
-    <h2>Стан пристрою</h2>
-    <div class="health" id="health"></div>
-    <div class="updated" id="updated"></div>
-  </section>
-
-  <section class="card">
-    <div class="card-head">
-      <h2>Журнал тривог і загроз</h2>
-      <label class="check"><input type="checkbox" id="otherToggle" checked> Інші загрози та Дніпровський район</label>
-    </div>
-    <div class="wrap">
-      <table>
-        <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
-        <tbody id="log"><tr><td colspan="5" class="muted">Завантаження…</td></tr></tbody>
-      </table>
-    </div>
-  </section>
-
-  <details class="card help">
+  </div>
+  <div class="pill" id="district"></div>
+  <button id="soundBtn">🔇 Увімкнути звук</button>
+  <button id="testBtn">▶ Перевірити звук</button>
+  <label class="muted"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
+  <div class="muted" id="soundMsg"></div>
+  <label class="muted">Назва пристрою (для списку сесій): <input id="devName" maxlength="40" placeholder="напр. ПК зміна 1"></label>
+  <div class="health" id="health"></div>
+  <details class="hint">
     <summary>Налаштування Microsoft Edge для постійної роботи</summary>
     <ol>
-      <li><b>Сон вкладок:</b> <code>edge://settings/system</code> → вимкніть «Заощаджуйте ресурси за допомогою вкладок у режимі сну» або додайте цей сайт у виключення.</li>
-      <li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту.</li>
+      <li><b>Сон вкладок:</b> <code>edge://settings/system</code> → «Заощаджуйте ресурси за допомогою вкладок у режимі сну» → вимкніть, або додайте цей сайт у «Ніколи не переводити ці сайти в режим сну».</li>
+      <li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту (тоді звук відновлюється сам після перезавантаження).</li>
       <li><b>Сповіщення:</b> значок замка в адресному рядку → Сповіщення → Дозволити.</li>
-      <li><b>Режим ефективності:</b> вимкніть для ПК на живленні й не давайте Windows засинати.</li>
-      <li><b>Найстабільніше:</b> Edge → «Програми» → «Установити цей сайт як програму». На вкладці з'явиться значок 🔊 — так і має бути.</li>
-      <li><b>iPhone:</b> Поділитись → «На початковий екран».</li>
+      <li><b>Режим ефективності:</b> вимкніть для цього ноутбука/ПК на живленні, а в Windows не давайте йому засинати.</li>
+      <li>Найстабільніше: Edge → «Програми» → «Установити цей сайт як програму» і працювати у вікні застосунку. На вкладці з'явиться значок 🔊 — так і має бути.</li>
     </ol>
   </details>
-</div>
+  <div class="hint">Натисніть «Увімкнути звук» один раз: це вмикає звук сирени й режим фонової роботи (сторінка тихо тримає аудіосесію, щоб браузер її не призупиняв). Можна згорнути браузер, але не закривайте вкладку. На iPhone надійніше додати сторінку на екран «Додому» (Поділитись → На початковий екран).</div>
+  <div class="muted" id="updated"></div>
+
+  <h2>Журнал тривог і загроз</h2>
+  <label class="muted"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
+      <tbody id="log"><tr><td colspan="5" class="muted">Завантаження…</td></tr></tbody>
+    </table>
+  </div>
+</main>
 
 <script>
 const TZ = 'Europe/Kyiv';
@@ -453,13 +303,14 @@ async function loadStatus() {
     if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
     if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
 
-    const z = s.raion || {};
-    const zEl = document.getElementById('raion');
-    const zk = z.ballistic ? 'ballistic' : z.active ? 'alert' : 'ok';
-    if (z.name) {
-      zEl.className = 'zone ' + (zk === 'ok' ? '' : zk);
-      zEl.textContent = z.name + ': ' + (zk === 'ballistic' ? '🔴 балістична загроза' : zk === 'alert' ? '🟡 повітряна тривога' : '🟢 тихо')
-        + (zk !== 'ok' && z.since ? ' · з ' + fmt(z.since) : '');
+    const d = s.district || {};
+    const dEl = document.getElementById('district');
+    const dk = d.ballistic ? 'ballistic' : d.active ? 'alert' : 'ok';
+    if (d.name) {
+      dEl.className = 'pill ' + (dk === 'ok' ? '' : dk);
+      dEl.textContent = d.name + ': ' + (dk === 'ballistic' ? '🔴 балістична загроза' : dk === 'alert' ? '🟡 повітряна тривога' : '🟢 тихо');
+      if (dk !== prevD && dk !== 'ok') notify(d.name, dk === 'ballistic' ? 'Балістична загроза' : 'Повітряна тривога');
+      prevD = dk;
     }
 
     const label = cur === 'ballistic' ? '🔴 БАЛІСТИКА' : cur === 'alert' ? '🟡 ТРИВОГА' : '🟢 Тихо';
@@ -470,7 +321,7 @@ async function loadStatus() {
     srcUpdated = s.updated || null;
     const upd = document.getElementById('updated');
     upd.textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
-    upd.className = 'updated' + (s.error ? ' err' : '');
+    upd.className = 'muted' + (s.error ? ' err' : '');
     syncSound();
     renderHealth();
   } catch (e) {
@@ -526,6 +377,35 @@ function startTicker(fn, ms) {
 
 function refreshAll() { loadStatus(); loadLog(); }
 
+let tick = 0;
+startTicker(() => {
+  tick++;
+  loadStatus();
+  if (tick % 6 === 0) loadLog();
+  if (tick % 2 === 0) sendHeartbeat();
+  const age = Date.now() - lastOk;
+  staleEl.hidden = age < 30000;
+  // Сторінка жива, але даних немає: звуковий сигнал раз на 2 хвилини після першої хвилини тиші
+  if (age > 60000 && Date.now() - lastBeep > 120000) { lastBeep = Date.now(); playBeep(); }
+  // Довго немає даних: якщо сервер доступний, перезавантажуємо сторінку (не частіше разу на 10 хв)
+  if (age > 180000) tryReload();
+  renderHealth();
+}, 5000);
+
+// Повернення на вкладку / розблокування / відновлення мережі — оновлюємось одразу
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    if (soundOn && wakeChk.checked) acquireWake();
+    resumeAudio();
+    refreshAll();
+  }
+  sendHeartbeat();
+});
+window.addEventListener('pagehide', () => sendHeartbeat(true));
+window.addEventListener('pageshow', () => { refreshAll(); sendHeartbeat(); });
+window.addEventListener('focus', refreshAll);
+window.addEventListener('online', refreshAll);
+
 function tryReload() {
   try {
     const last = +(sessionStorage.getItem('lastReload') || 0);
@@ -537,11 +417,8 @@ function tryReload() {
   } catch (e) {}
 }
 
-// ---------- Пристрій і сесія ----------
-let devName = '';
-try { devName = (localStorage.getItem('devName') || '').trim(); } catch (e) {}
-let appStarted = false;
-
+// ---------- Сигнал «я жива» для сторінки /sessions ----------
+const devNameEl = document.getElementById('devName');
 function tabId() {
   try {
     let t = sessionStorage.getItem('tabId');
@@ -554,13 +431,16 @@ function tabId() {
 }
 const TAB_ID = tabId();
 const PAGE_STARTED = Date.now();
+try { devNameEl.value = localStorage.getItem('devName') || ''; } catch (e) {}
+devNameEl.onchange = () => {
+  try { localStorage.setItem('devName', devNameEl.value.trim()); } catch (e) {}
+  sendHeartbeat();
+};
 
-// Сигнал «я жива» для сторінки /sessions (лише після введення назви пристрою)
 function sendHeartbeat(closing) {
-  if (!appStarted || !devName) return;
   const body = closing ? {id: TAB_ID, closing: true} : {
     id: TAB_ID,
-    name: devName,
+    name: devNameEl.value.trim(),
     ua: navigator.userAgent,
     sound: soundOn,
     playing: !player.paused,
@@ -620,111 +500,31 @@ function renderHealth() {
   const bad = chips.some(c => c.classList.contains('bad'));
   const title = document.createElement('div');
   title.className = 'htitle';
-  title.textContent = bad ? '⚠️ Є проблеми' : '✅ Усе працює';
+  title.textContent = bad ? '⚠️ Фоновий режим: є проблеми' : '✅ Фоновий режим: усе працює';
   box.className = 'health ' + (bad ? 'bad' : 'ok');
-  const wrap = document.createElement('div');
-  wrap.className = 'chips';
-  wrap.append(...chips);
-  box.replaceChildren(title, wrap);
+  box.replaceChildren(title, ...chips);
 }
 
-// ---------- Запуск застосунку (лише після введення назви пристрою) ----------
-function startApp() {
-  appStarted = true;
-  holdLock();
+// Page Lifecycle: якщо браузер таки заморозив сторінку — після розморожування одразу оновлюємось
+document.addEventListener('resume', () => { resumeAudio(); refreshAll(); });
 
-  // Відновлюємо звук, якщо він був увімкнений (автоматично, якщо дозволено автозвук або є клік по «Продовжити»)
-  try {
-    if (localStorage.getItem('soundOn') === '1') {
-      soundOn = true;
-      btn.classList.add('on');
-      btn.textContent = '🔊 Звук увімкнено';
-      playSilence().then(() => { blocked = false; msg.textContent = ''; syncSound(); }).catch(onPlayError);
-      if (wakeChk.checked) acquireWake();
-    }
-  } catch (e) {}
+holdLock();
 
-  let tick = 0;
-  startTicker(() => {
-    tick++;
-    loadStatus();
-    if (tick % 6 === 0) loadLog();
-    if (tick % 2 === 0) sendHeartbeat();
-    const age = Date.now() - lastOk;
-    staleEl.hidden = age < 30000;
-    // Сторінка жива, але даних немає: звуковий сигнал раз на 2 хвилини після першої хвилини тиші
-    if (age > 60000 && Date.now() - lastBeep > 120000) { lastBeep = Date.now(); playBeep(); }
-    // Довго немає даних: якщо сервер доступний, перезавантажуємо сторінку (не частіше разу на 10 хв)
-    if (age > 180000) tryReload();
-    renderHealth();
-  }, 5000);
+// Після перезавантаження/відновлення вкладки самі вмикаємо звук, якщо він був увімкнений
+// (спрацює автоматично, якщо в Edge дозволено автозвук для сайту; інакше — один дотик до екрана)
+try {
+  if (localStorage.getItem('soundOn') === '1') {
+    soundOn = true;
+    btn.classList.add('on');
+    btn.textContent = '🔊 Звук увімкнено';
+    playSilence().then(() => { blocked = false; msg.textContent = ''; syncSound(); }).catch(onPlayError);
+    if (wakeChk.checked) acquireWake();
+  }
+} catch (e) {}
 
-  // Повернення на вкладку / розблокування / відновлення мережі — оновлюємось одразу
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      if (soundOn && wakeChk.checked) acquireWake();
-      resumeAudio();
-      refreshAll();
-    }
-    sendHeartbeat();
-  });
-  window.addEventListener('pagehide', () => sendHeartbeat(true));
-  window.addEventListener('pageshow', () => { refreshAll(); sendHeartbeat(); });
-  window.addEventListener('focus', refreshAll);
-  window.addEventListener('online', refreshAll);
-  // Page Lifecycle: якщо браузер таки заморозив сторінку — після розморожування одразу оновлюємось
-  document.addEventListener('resume', () => { resumeAudio(); refreshAll(); });
-
-  renderHealth();
-  refreshAll();
-  sendHeartbeat();
-}
-
-// ---------- Екран введення назви ----------
-const gate = document.getElementById('gate');
-const gateForm = document.getElementById('gateForm');
-const gateName = document.getElementById('gateName');
-const gateBtn = document.getElementById('gateBtn');
-const gateErr = document.getElementById('gateErr');
-const gateCancel = document.getElementById('gateCancel');
-const appEl = document.getElementById('app');
-const devLabel = document.getElementById('devLabel');
-
-const validName = v => v.trim().length >= 2;
-
-function showGate() {
-  gate.hidden = false;
-  appEl.hidden = true;
-  gateName.value = devName;
-  gateBtn.disabled = !validName(devName);
-  gateErr.textContent = '';
-  gateCancel.hidden = !devName;   // скасувати можна лише якщо назва вже є
-  setTimeout(() => gateName.focus(), 0);
-}
-
-function enterApp() {
-  gate.hidden = true;
-  appEl.hidden = false;
-  devLabel.textContent = devName;
-  if (!appStarted) startApp(); else sendHeartbeat();
-}
-
-gateName.oninput = () => { gateBtn.disabled = !validName(gateName.value); gateErr.textContent = ''; };
-
-gateForm.onsubmit = e => {
-  e.preventDefault();
-  const v = gateName.value.trim().replace(/\s+/g, ' ');
-  if (!validName(v)) { gateErr.textContent = 'Введіть назву, щонайменше 2 символи.'; return; }
-  devName = v;
-  try { localStorage.setItem('devName', v); } catch (err) {}
-  enterApp();   // виконується прямо в кліку, тому браузер дозволяє запустити звук
-};
-
-gateCancel.onclick = () => enterApp();
-document.getElementById('devChange').onclick = showGate;
-
-if (validName(devName)) enterApp(); else showGate();
-
+renderHealth();
+refreshAll();
+sendHeartbeat();
 </script>
 </body>
 </html>
