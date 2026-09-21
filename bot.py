@@ -284,9 +284,11 @@ def msg_ballistic() -> str:
 
 def msg_alert(suffix: str = "") -> str:
     return (
+        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
         f"Прямуйте в укриття.\n\n"
+        f"{YELLOW}"
     )
 
 
@@ -302,32 +304,40 @@ def msg_test(label: str) -> str:
 
 def msg_ballistic_clear() -> str:
     return (
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"🟡 Повітряна тривога триває — залишайтесь в укритті.\n\n"
+        f"{GREEN}"
     )
 
 
 def msg_district_ballistic_clear() -> str:
     return (
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"🟡 Повітряна тривога в районі триває.\n\n"
+        f"{GREEN}"
     )
 
 
 def msg_test_clear() -> str:
     return (
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ (ТЕСТ) ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"Тестову перевірку завершено.\n\n"
+        f"{GREEN}"
     )
 
 
 def msg_clear() -> str:
     return (
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
+        f"{GREEN}"
     )
 
 
@@ -343,11 +353,11 @@ def kam_line() -> str:
 
 def msg_district_alert() -> str:
     return (
-        
+        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"{kam_line()}\n\n"
-        
+        f"{YELLOW}"
     )
 
 
@@ -363,8 +373,10 @@ def msg_district_ballistic() -> str:
 
 def msg_district_clear() -> str:
     return (
+        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
+        f"{GREEN}"
     )
 
 
@@ -708,6 +720,30 @@ async def h_sound(_):
     return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
+async def h_manifest(_):
+    return web.json_response(
+        {
+            "name": f"Моніторинг тривог — {CITY_NAME}",
+            "short_name": "Тривога",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#0d1117",
+            "theme_color": "#0d1117",
+            "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+        },
+        content_type="application/manifest+json",
+    )
+
+
+async def h_icon(_):
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<rect width="100" height="100" rx="20" fill="#0d1117"/>'
+        '<text x="50" y="70" font-size="60" text-anchor="middle">🚨</text></svg>'
+    )
+    return web.Response(text=svg, content_type="image/svg+xml")
+
+
 async def h_status(_):
     if test["mode"] and time.time() < test["until"]:
         return web.json_response(
@@ -784,6 +820,8 @@ async def main():
         [
             web.get("/", h_index),
             web.get("/alarm.mp3", h_sound),
+            web.get("/manifest.webmanifest", h_manifest),
+            web.get("/icon.svg", h_icon),
             web.get("/api/status", h_status),
             web.get("/api/log", h_log),
             web.get("/api/test", h_test),
