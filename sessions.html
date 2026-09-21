@@ -100,14 +100,14 @@ function render(rows) {
     const card = document.createElement('div'); card.className = 'card ' + r.status;
     const row = document.createElement('div'); row.className = 'row';
     const name = document.createElement('span'); name.className = 'name';
-    name.textContent = (r.name || 'Без назви') + '  #' + r.id;
+    name.textContent = r.named ? r.name : 'Без назви (вкладка #' + r.tab + ')';
     const st = document.createElement('span'); st.className = 'status';
     st.textContent = STATUS[r.status] + ' · сигнал ' + ago(r.age);
     row.append(name, st);
 
     const meta = document.createElement('div'); meta.className = 'meta';
     const live = r.status === 'ok' || r.status === 'problem';
-    meta.textContent = [browser(r.ua), r.ip ? 'IP ' + r.ip : '', live ? 'відкрита ' + dur(r.uptime) : '',
+    meta.textContent = [browser(r.ua), live ? 'відкрита ' + dur(r.uptime) : '', live && r.tabs > 1 ? 'вкладок: ' + r.tabs : '',
                         live && !r.visible ? 'у фоні' : '', r.standalone ? 'як застосунок' : ''].filter(Boolean).join(' · ');
     card.append(row, meta);
 
