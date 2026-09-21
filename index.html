@@ -28,6 +28,9 @@
   .tag { padding:2px 8px; border-radius:6px; font-size:.8rem; background:var(--warn); color:#000; }
   .tag.b { background:var(--bad); color:#fff; }
   .tag.o { background:#6e7681; color:#fff; }
+  .pill { display:inline-block; margin-top:12px; padding:6px 12px; border-radius:999px; background:var(--card); border:1px solid var(--line); font-size:.9rem; }
+  .pill.alert { border-color:#e3b100; }
+  .pill.ballistic { border-color:#e5202a; }
   .tag.t { background:#1f6feb; color:#fff; }
   tr.other td { color:var(--muted); }
   label.muted { display:block; margin:0 0 10px; }
@@ -42,13 +45,14 @@
     <div class="big" id="big">Завантаження…</div>
     <div class="sub" id="sub"></div>
   </div>
+  <div class="pill" id="district"></div>
   <button id="soundBtn">🔇 Увімкнути звук</button>
   <button id="testBtn">▶ Перевірити звук</button>
   <div class="muted" id="soundMsg"></div>
   <div class="muted" id="updated"></div>
 
   <h2>Журнал тривог і загроз</h2>
-  <label class="muted"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози (без сирени)</label>
+  <label class="muted"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
   <div class="wrap">
     <table>
       <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
@@ -116,6 +120,12 @@ async function loadStatus() {
     else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
     if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
     if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
+    const d = s.district || {};
+    const dEl = document.getElementById('district');
+    if (d.name) {
+      dEl.className = 'pill ' + (d.ballistic ? 'ballistic' : d.active ? 'alert' : '');
+      dEl.textContent = d.name + ': ' + (d.ballistic ? '🔴 балістична загроза' : d.active ? '🟡 повітряна тривога' : '🟢 тихо');
+    }
     document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
 
     syncSound();
@@ -134,7 +144,7 @@ async function loadLog() {
   const tbody = document.getElementById('log');
   try {
     let rows = await (await fetch('/api/log')).json();
-    rows = rows.filter(r => showOther || r.category !== 'other');
+    rows = rows.filter(r => showOther || (r.category !== 'other' && r.category !== 'district'));
     tbody.innerHTML = '';
     if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted">Записів ще немає</td></tr>'; return; }
     for (const r of rows) {
@@ -151,7 +161,7 @@ async function loadLog() {
       else { tag.className = 'tag' + (r.ballistic ? ' b' : ''); tag.textContent = r.ballistic ? 'Балістика' : 'Повітряна'; }
       td.appendChild(tag); tr.appendChild(td);
       const cm = document.createElement('td');
-      cm.textContent = other ? [r.location, r.notes].filter(Boolean).join(' — ') : (r.notes || '');
+      cm.textContent = (other || r.category === 'district') ? [r.location, r.notes].filter(Boolean).join(' — ') : (r.notes || '');
       tr.appendChild(cm);
       tbody.appendChild(tr);
     }
