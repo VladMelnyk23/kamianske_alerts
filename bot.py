@@ -53,6 +53,9 @@ BALLISTIC_INTERVAL = max(1.0, float(env("BALLISTIC_INTERVAL", "1")))
 # Дніпровський район: окремо стежимо, пишемо в журнал і Telegram (без сирени на сторінці)
 DISTRICT_NAME = env("DISTRICT_NAME", "Дніпровський район")
 DISTRICT_MATCH = env("DISTRICT_MATCH", "Дніпровський район")
+# Кам'янський район: лише показується на сторінці (без журналу, Telegram і сирени)
+RAION_NAME = env("RAION_NAME", "Кам'янський район")
+RAION_MATCH = env("RAION_MATCH", "Кам'янський район")
 DISTRICT_BALLISTIC_REPEAT = max(1, int(env("DISTRICT_BALLISTIC_REPEAT", "3")))
 # Тривога на рівні всієї області вважається тривогою й для Кам'янського
 OBLAST_COVERS = env("OBLAST_COVERS", "1") == "1"
@@ -109,6 +112,17 @@ def is_mine(a: dict) -> bool:
     if covers_oblast(a):
         return True
     return norm(OBLAST) == norm(a.get("location_oblast")) and norm(LOCATION_MATCH) in norm(
+        a.get("location_title")
+    )
+
+
+def is_raion(a: dict) -> bool:
+    """Повітряна тривога/балістика в Кам'янському районі (або на рівні всієї області)."""
+    if a.get("alert_type") != "air_raid" and not is_ballistic(a):
+        return False
+    if covers_oblast(a):
+        return True
+    return norm(OBLAST) == norm(a.get("location_oblast")) and norm(RAION_MATCH) in norm(
         a.get("location_title")
     )
 
@@ -214,6 +228,19 @@ other_open: dict[int, str] = {
 }
 if open_ids:
     state.update(active=True, ballistic=any(open_ids.values()))
+r_state = {"active": False, "ballistic": False, "since": None}  # Кам'янський район (лише для сторінки)
+
+
+def update_raion(mine: list[dict]):
+    was = r_state["active"]
+    r_state["active"] = bool(mine)
+    r_state["ballistic"] = any(is_ballistic(a) for a in mine)
+    if r_state["active"] and not was:
+        r_state["since"] = now_iso()
+    if not r_state["active"]:
+        r_state["since"] = None
+
+
 d_state = {"active": False, "ballistic": False, "since": None}
 d_open: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
@@ -553,6 +580,7 @@ async def poller(session: ClientSession):
                 data = await r.json()
             alerts = data.get("alerts", [])
             res = process([a for a in alerts if is_siren(a)])
+            update_raion([a for a in alerts if is_raion(a)])
             dres = process_district([a for a in alerts if is_district(a)])
             new_other, closed_other = process_other([a for a in alerts if is_other(a)])
             state.update(updated=now_iso(), error=None)
@@ -926,6 +954,12 @@ async def h_status(_):
             {
                 **state,
                 "district": {**d_state, "name": DISTRICT_NAME},
+                "raion": {
+                    "name": RAION_NAME,
+                    "active": True,
+                    "ballistic": test["mode"] == "ballistic",
+                    "since": test["since"],
+                },
                 "active": True,
                 "ballistic": test["mode"] == "ballistic",
                 "since": test["since"],
@@ -936,7 +970,13 @@ async def h_status(_):
     if test["mode"]:
         await finish_test()
     return web.json_response(
-        {**state, "district": {**d_state, "name": DISTRICT_NAME}, "test": False, "city": CITY_NAME}
+        {
+            **state,
+            "district": {**d_state, "name": DISTRICT_NAME},
+            "raion": {**r_state, "name": RAION_NAME},
+            "test": False,
+            "city": CITY_NAME,
+        }
     )
 
 
