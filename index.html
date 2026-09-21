@@ -248,58 +248,81 @@ function beepUrl() {
 
 const SILENCE = silentWavUrl();
 const BEEP = beepUrl();
+const ALARM_SRC = '/alarm.mp3';
 const player = new Audio();
 player.preload = 'auto';
 player.setAttribute('playsinline', '');
 let soundOn = false, cur = 'ok', prevD = 'ok', playedFor = null, mode = null, blocked = false;
 let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0, srcError = null, srcUpdated = null;
+// playToken серіалізує перемикання джерела: зміна src обриває попередній play() з AbortError,
+// testUntil захищає ручну перевірку звуку від фонових перевірок (syncSound / resumeAudio / playBeep).
+let playToken = 0, testUntil = 0;
 const btn = document.getElementById('soundBtn');
 const testBtn = document.getElementById('testBtn');
 const msg = document.getElementById('soundMsg');
 const wakeChk = document.getElementById('wakeChk');
 const staleEl = document.getElementById('stale');
 
+// Помилка завантаження файлу конкретніша за помилку play(), тож не даємо її затерти.
+let srcErrorShown = false;
+
 function onPlayError(e) {
+  console.error('audio', e);
   if (e && e.name === 'NotAllowedError') {
     blocked = true;
+    srcErrorShown = false;
     msg.textContent = 'Браузер заблокував звук. Торкніться екрана або натисніть кнопку «Увімкнути звук».';
-  } else {
-    msg.textContent = 'Відтворення не вдалося: ' + (e && e.name) + ' ' + (e && e.message || '');
+  } else if (!srcErrorShown) {
+    msg.textContent = 'Не вдалося відтворити звук. Спробуйте ще раз або перезавантажте сторінку.';
   }
 }
 
+// Будь-яке присвоєння player.src перезапускає завантаження і скасовує попередній play().
+// Тому джерело міняємо лише за потреби, а AbortError від витісненого виклику ковтаємо.
+function playSrc(src, loop) {
+  const my = ++playToken;
+  if (player.getAttribute('src') !== src) player.src = src;
+  player.loop = loop;
+  return player.play().catch(e => {
+    if (e && e.name === 'AbortError' && my !== playToken) return;  // нас витіснив новіший виклик
+    throw e;
+  });
+}
+
 function playSilence() {
-  if (mode !== 'silence') { player.src = SILENCE; mode = 'silence'; }
-  player.loop = true;
-  return player.play();
+  mode = 'silence';
+  return playSrc(SILENCE, true);
 }
 
 function playSiren(loop) {
-  player.src = '/alarm.mp3';
   mode = 'siren';
-  player.loop = loop;
-  return player.play();
+  return playSrc(ALARM_SRC, loop);
 }
 
-// Сигнал втрати зв'язку (не перебиває сирену)
+// Сигнал втрати зв'язку (не перебиває сирену й ручну перевірку)
 function playBeep() {
   if (!soundOn || blocked || cur !== 'ok' || mode === 'siren') return;
-  player.src = BEEP; mode = 'beep'; player.loop = false;
-  player.play().catch(onPlayError);
+  if (Date.now() < testUntil) return;
+  mode = 'beep';
+  playSrc(BEEP, false).catch(onPlayError);
 }
 
-player.addEventListener('playing', () => renderHealth());
+player.addEventListener('playing', () => { srcErrorShown = false; renderHealth(); });
 player.addEventListener('pause', () => renderHealth());
 player.addEventListener('error', () => {
-  if (mode === 'siren') msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
+  if (mode === 'siren') {
+    srcErrorShown = true;
+    msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
+  }
 });
 // Сирена без повтору закінчилась -> повертаємось до тиші, щоб сесія не завмерла
 player.addEventListener('ended', () => {
-  if (soundOn) { mode = null; playSilence().catch(onPlayError); }
+  if (soundOn) playSilence().catch(onPlayError); else mode = null;
 });
 
 function syncSound() {
   if (!soundOn) return;
+  if (Date.now() < testUntil) return;   // йде ручна перевірка — не чіпаємо плеєр
   // Сирена лунає лише при балістичній загрозі. Звичайна повітряна тривога
   // (cur === 'alert') і стан 'ok' лишають фонову тишу — тільки колір/текст/сповіщення міняються.
   if (cur !== 'ballistic') {
@@ -316,6 +339,10 @@ function syncSound() {
 // Аудіо могло бути перервано системою (дзвінок, блокування) — відновлюємо
 function resumeAudio() {
   if (!soundOn) return;
+  if (Date.now() < testUntil) return;   // йде ручна перевірка — не чіпаємо плеєр
+  // player.paused === true і під час завантаження нового джерела, тому не втручаємось,
+  // поки плеєр ще не має даних (інакше обірвемо сирену, що саме вантажиться).
+  if (player.readyState === 0 && !blocked) return;
   if (player.paused || blocked) {
     blocked = false;
     playedFor = null;
@@ -375,9 +402,13 @@ btn.onclick = () => {
 wakeChk.onchange = () => { if (soundOn) { if (wakeChk.checked) acquireWake(); else releaseWake(); } };
 
 testBtn.onclick = () => {
-  playSiren(false).then(() => { msg.textContent = ''; }).catch(onPlayError);
+  testUntil = Date.now() + 15000;   // вікно, у якому фонові перевірки не перемикають джерело
+  srcErrorShown = false;
+  playSiren(false).then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
   setTimeout(() => {
-    if (cur !== 'ok') return;
+    testUntil = 0;
+    if (mode !== 'siren' || player.ended) return;   // сирену вже завершив обробник 'ended'
+    if (cur !== 'ok') { syncSound(); return; }
     if (soundOn) playSilence().catch(onPlayError); else { player.pause(); mode = null; }
   }, 4000);
 };
@@ -474,8 +505,11 @@ async function loadLog() {
 function startTicker(fn, ms) {
   try {
     const blob = new Blob(['setInterval(function(){postMessage(1)},' + ms + ')'], {type: 'text/javascript'});
-    const w = new Worker(URL.createObjectURL(blob));
+    const url = URL.createObjectURL(blob);
+    const w = new Worker(url);
+    URL.revokeObjectURL(url);                 // воркер уже стартував, URL більше не потрібен
     w.onmessage = fn;
+    window.addEventListener('pagehide', () => w.terminate());
     return;
   } catch (e) {}
   setInterval(fn, ms);
@@ -633,4 +667,5 @@ refreshAll();
 sendHeartbeat();
 </script>
 </body>
+</html>
 </html>
