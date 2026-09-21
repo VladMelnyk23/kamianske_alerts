@@ -745,39 +745,71 @@ def to_int(v, default=0) -> int:
         return default
 
 
+TAB_TO_KEY: dict[str, str] = {}   # id вкладки -> ключ сесії (щоб знати, чию сесію закриває вкладка)
+UNNAMED_KEEP_SEC = 120            # сесії без назви зникають швидко, щоб не плодити копії
+
+
+def session_key(name: str, tab_id: str) -> str:
+    """Сесію визначає ЛИШЕ назва пристрою (IP і браузер не враховуються).
+    Без назви ключем стає id вкладки, і такі записи швидко зникають."""
+    norm_name = " ".join(name.split()).casefold()
+    return "name:" + norm_name if norm_name else "tab:" + tab_id
+
+
 async def h_heartbeat(request: web.Request):
     """Сторінка раз на ~10 с повідомляє, що вона жива, і свій стан."""
     try:
         data = await request.json()
     except Exception:
         return web.json_response({"error": "bad json"}, status=400)
-    sid = clip(data.get("id"), 60)
-    if not sid:
+    tab_id = clip(data.get("id"), 60)
+    if not tab_id:
         return web.json_response({"error": "no id"}, status=400)
     now = time.time()
-    sess = SESSIONS.get(sid)
+
+    if data.get("closing"):  # вкладку закрили: прибираємо її з сесії
+        key = TAB_TO_KEY.pop(tab_id, None)
+        sess = SESSIONS.get(key) if key else None
+        if sess:
+            sess["tabs"].pop(tab_id, None)
+            sess["last_seen"] = now
+        return web.json_response({"ok": True})
+
+    name = clip(data.get("name"), 40).strip()
+    key = session_key(name, tab_id)
+
+    # Пристрій перейменували: вкладка переходить зі старої сесії в нову
+    old_key = TAB_TO_KEY.get(tab_id)
+    if old_key and old_key != key and old_key in SESSIONS:
+        old = SESSIONS[old_key]
+        old["tabs"].pop(tab_id, None)
+        if not old["tabs"]:
+            del SESSIONS[old_key]
+    TAB_TO_KEY[tab_id] = key
+
+    sess = SESSIONS.get(key)
     if sess is None:
         if len(SESSIONS) >= SESSION_MAX:  # захист від засмічення: прибираємо найстарішу
             oldest = min(SESSIONS, key=lambda k: SESSIONS[k]["last_seen"])
             del SESSIONS[oldest]
-        sess = SESSIONS[sid] = {"first_seen": now}
+        sess = SESSIONS[key] = {"first_seen": now, "tabs": {}}
+    sess["tabs"][tab_id] = now
     sess["last_seen"] = now
-    sess["closing"] = bool(data.get("closing"))
-    if not sess["closing"]:
-        sess.update(
-            name=clip(data.get("name"), 40),
-            ua=clip(data.get("ua"), 200),
-            ip=client_ip(request),
-            sound=bool(data.get("sound")),
-            playing=bool(data.get("playing")),
-            blocked=bool(data.get("blocked")),
-            wake=bool(data.get("wake")),
-            lock=bool(data.get("lock")),
-            data_age=to_int(data.get("data_age")),
-            visible=bool(data.get("visible")),
-            standalone=bool(data.get("standalone")),
-            uptime=to_int(data.get("uptime")),
-        )
+    sess.update(
+        name=name,
+        named=bool(name),
+        tab=tab_id[:6],
+        ua=clip(data.get("ua"), 200),
+        sound=bool(data.get("sound")),
+        playing=bool(data.get("playing")),
+        blocked=bool(data.get("blocked")),
+        wake=bool(data.get("wake")),
+        lock=bool(data.get("lock")),
+        data_age=to_int(data.get("data_age")),
+        visible=bool(data.get("visible")),
+        standalone=bool(data.get("standalone")),
+        uptime=to_int(data.get("uptime")),
+    )
     return web.json_response({"ok": True})
 
 
@@ -789,10 +821,13 @@ def admin_ok(request: web.Request) -> bool:
 def sessions_payload() -> list[dict]:
     now = time.time()
     out = []
-    for sid, sess in list(SESSIONS.items()):
+    for key, sess in list(SESSIONS.items()):
         age = now - sess["last_seen"]
-        if age > SESSION_KEEP_SEC:
-            del SESSIONS[sid]
+        # Вкладки без сигналу довше за поріг вважаємо мертвими
+        live_tabs = [t for t, seen in sess["tabs"].items() if now - seen <= SESSION_ACTIVE_SEC]
+        keep = SESSION_KEEP_SEC if sess.get("named") else UNNAMED_KEEP_SEC
+        if not live_tabs and age > keep:
+            del SESSIONS[key]
             continue
         problems = []
         if not sess.get("sound"):
@@ -803,18 +838,21 @@ def sessions_payload() -> list[dict]:
             problems.append("звук не грає")
         if sess.get("data_age", 0) > 30:
             problems.append(f"немає даних {sess['data_age']} с")
-        if sess.get("closing"):
-            status = "closed"
-        elif age <= SESSION_ACTIVE_SEC:
+        if not sess.get("named"):
+            problems.append("не вказано назву пристрою")
+        if live_tabs:
             status = "problem" if problems else "ok"
+        elif not sess["tabs"]:
+            status = "closed"      # усі вкладки цього пристрою закрито
         else:
-            status = "offline"
+            status = "offline"     # вкладки є, але сигналу немає
         out.append(
             {
-                "id": sid[:8],
-                "key": sid,
+                "key": key,
                 "name": sess.get("name", ""),
-                "ip": sess.get("ip", ""),
+                "named": bool(sess.get("named")),
+                "tab": sess.get("tab", ""),
+                "tabs": len(live_tabs),
                 "ua": sess.get("ua", ""),
                 "status": status,
                 "problems": problems,
@@ -830,7 +868,7 @@ def sessions_payload() -> list[dict]:
             }
         )
     order = {"problem": 0, "offline": 1, "ok": 2, "closed": 3}
-    out.sort(key=lambda r: (order[r["status"]], r["name"].lower(), r["ip"]))
+    out.sort(key=lambda r: (order[r["status"]], r["name"].lower()))
     return out
 
 
