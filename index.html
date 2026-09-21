@@ -44,6 +44,18 @@
   .wrap { overflow-x:auto; }
   [hidden] { display:none !important; }
   .stale { background:#3d3000; border:1px solid #e3b100; border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:.9rem; }
+  .health { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); }
+  .health.ok { border-color:#238636; background:rgba(35,134,54,.10); }
+  .health.bad { border-color:#da3633; background:rgba(218,54,51,.12); }
+  .health .htitle { flex:1 0 100%; font-size:.9rem; font-weight:600; }
+  .health.ok .htitle { color:#3fb950; }
+  .health.bad .htitle { color:#ff7b72; }
+  .chip { display:inline-block; padding:4px 10px; border-radius:999px; font-size:.82rem; border:1px solid; white-space:nowrap; }
+  .chip.ok { color:#3fb950; border-color:#238636; background:rgba(35,134,54,.18); }
+  .chip.bad { color:#ff7b72; border-color:#da3633; background:rgba(218,54,51,.18); }
+  .chip.off { color:var(--muted); border-color:var(--line); background:transparent; }
+  #soundMsg:not(:empty) { color:#ff7b72; border:1px solid #da3633; background:rgba(218,54,51,.12); border-radius:10px; padding:8px 10px; margin:8px 0; }
+  .err { color:#ff7b72; }
   .hint { color:var(--muted); font-size:.82rem; line-height:1.4; margin:6px 0 4px; }
   .muted { color:var(--muted); font-size:.85rem; }
 </style>
@@ -61,7 +73,7 @@
   <button id="testBtn">▶ Перевірити звук</button>
   <label class="muted"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
   <div class="muted" id="soundMsg"></div>
-  <div class="muted" id="health"></div>
+  <div class="health" id="health"></div>
   <details class="hint">
     <summary>Налаштування Microsoft Edge для постійної роботи</summary>
     <ol>
@@ -134,7 +146,7 @@ const player = new Audio();
 player.preload = 'auto';
 player.setAttribute('playsinline', '');
 let soundOn = false, cur = 'ok', prevD = 'ok', playedFor = null, mode = null, blocked = false;
-let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0;
+let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0, srcError = null, srcUpdated = null;
 const btn = document.getElementById('soundBtn');
 const testBtn = document.getElementById('testBtn');
 const msg = document.getElementById('soundMsg');
@@ -170,6 +182,8 @@ function playBeep() {
   player.play().catch(onPlayError);
 }
 
+player.addEventListener('playing', () => renderHealth());
+player.addEventListener('pause', () => renderHealth());
 player.addEventListener('error', () => {
   if (mode === 'siren') msg.textContent = 'Не вдалося завантажити alarm.mp3: файл відсутній або пошкоджений.';
 });
@@ -247,6 +261,7 @@ btn.onclick = () => {
   } else {
     player.pause(); mode = null; releaseWake();
   }
+  renderHealth();
 };
 
 wakeChk.onchange = () => { if (soundOn) { if (wakeChk.checked) acquireWake(); else releaseWake(); } };
@@ -300,12 +315,18 @@ async function loadStatus() {
     updateTitle((s.test ? '🔵 ТЕСТ · ' : '') + label + ' · ' + s.city, label);
     if (cur !== prev && cur !== 'ok') notify(s.city, cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!');
 
-    document.getElementById('updated').textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
+    srcError = s.error || null;
+    srcUpdated = s.updated || null;
+    const upd = document.getElementById('updated');
+    upd.textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
+    upd.className = 'muted' + (s.error ? ' err' : '');
     syncSound();
+    renderHealth();
   } catch (e) {
     box.className = 'status error';
     big.textContent = 'Немає зв\'язку із сервером';
     sub.textContent = '';
+    renderHealth();
   }
 }
 
@@ -401,14 +422,42 @@ function holdLock() {
   } catch (e) {}
 }
 
+function chip(label, state, text) {
+  const el = document.createElement('span');
+  el.className = 'chip ' + state;
+  el.textContent = (state === 'ok' ? '✓ ' : state === 'bad' ? '✕ ' : '– ') + label + ': ' + text;
+  return el;
+}
+
+// Зелений — працює, червоний — не працює, сірий — вимкнено за вибором користувача
 function renderHealth() {
-  const parts = [];
-  parts.push('звук: ' + (!soundOn ? 'вимкнено' : (player.paused ? '⚠️ не грає' : '✓ активний')));
-  parts.push('екран: ' + (wakeLock ? '✓' : (soundOn && wakeChk.checked ? '⚠️' : '—')));
-  parts.push('захист від сну: ' + (lockOn ? '✓' : '—'));
+  const box = document.getElementById('health');
+  const chips = [];
+
+  if (!soundOn) chips.push(chip('Звук', 'bad', 'вимкнено'));
+  else if (player.paused || blocked) chips.push(chip('Звук', 'bad', blocked ? 'заблоковано браузером' : 'не грає'));
+  else chips.push(chip('Звук', 'ok', 'активний'));
+
+  if (!wakeChk.checked) chips.push(chip('Екран', 'off', 'може гаснути (за вибором)'));
+  else chips.push(wakeLock ? chip('Екран', 'ok', 'не гасне') : chip('Екран', 'bad', 'може згаснути'));
+
+  chips.push(lockOn ? chip('Захист від сну', 'ok', 'активний') : chip('Захист від сну', 'bad', 'недоступний'));
+
   const age = Math.round((Date.now() - lastOk) / 1000);
-  parts.push('дані: ' + (age < 15 ? '✓ свіжі' : '⚠️ ' + age + ' с тому'));
-  document.getElementById('health').textContent = 'Фоновий режим — ' + parts.join(' · ');
+  chips.push(age < 20 ? chip('Дані', 'ok', 'свіжі') : chip('Дані', 'bad', 'немає ' + age + ' с'));
+
+  const srcAge = srcUpdated ? (Date.now() - new Date(srcUpdated)) / 1000 : null;
+  if (age >= 20) chips.push(chip('Джерело тривог', 'bad', 'невідомо (немає даних)'));
+  else if (srcError) chips.push(chip('Джерело тривог', 'bad', 'помилка'));
+  else if (srcAge !== null && srcAge > 90) chips.push(chip('Джерело тривог', 'bad', 'не оновлюється'));
+  else chips.push(chip('Джерело тривог', 'ok', 'на зв\'язку'));
+
+  const bad = chips.some(c => c.classList.contains('bad'));
+  const title = document.createElement('div');
+  title.className = 'htitle';
+  title.textContent = bad ? '⚠️ Фоновий режим: є проблеми' : '✅ Фоновий режим: усе працює';
+  box.className = 'health ' + (bad ? 'bad' : 'ok');
+  box.replaceChildren(title, ...chips);
 }
 
 // Page Lifecycle: якщо браузер таки заморозив сторінку — після розморожування одразу оновлюємось
