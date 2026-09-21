@@ -303,70 +303,70 @@ GREEN = "🟢✅" * 7    # відбій
 
 def msg_ballistic() -> str:
     return (
-        f"{RED}\n{RED}\n\n"
+        
         f"🚀🚀 БАЛІСТИЧНА ЗАГРОЗА 🚀🚀\n"
         f"📍 {CITY_NAME}\n\n"
         f"❗❗ НЕГАЙНО В УКРИТТЯ! ❗❗\n\n"
-        f"{RED}\n{RED}"
+        
     )
 
 
 def msg_alert(suffix: str = "") -> str:
     return (
-        f"{YELLOW}\n\n"
+        
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
         f"Прямуйте в укриття.\n\n"
-        f"{YELLOW}"
+       
     )
 
 
 def msg_test(label: str) -> str:
     return (
-        f"{BLUE}\n\n"
+       
         f"🧪 ТЕСТ: {label} 🧪\n"
         f"📍 {CITY_NAME}\n\n"
         f"Це перевірка, реальної загрози немає.\n\n"
-        f"{BLUE}"
+        
     )
 
 
 def msg_ballistic_clear() -> str:
     return (
-        f"{GREEN}\n\n"
+       
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"🟡 Повітряна тривога триває — залишайтесь в укритті.\n\n"
-        f"{GREEN}"
+        
     )
 
 
 def msg_district_ballistic_clear() -> str:
     return (
-        f"{GREEN}\n\n"
+       
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"🟡 Повітряна тривога в районі триває.\n\n"
-        f"{GREEN}"
+       
     )
 
 
 def msg_test_clear() -> str:
     return (
-        f"{GREEN}\n\n"
+      
         f"✅ ВІДБІЙ (ТЕСТ) ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"Тестову перевірку завершено.\n\n"
-        f"{GREEN}"
+      
     )
 
 
 def msg_clear() -> str:
     return (
-        f"{GREEN}\n\n"
+        
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
-        f"{GREEN}"
+       
     )
 
 
@@ -382,30 +382,30 @@ def kam_line() -> str:
 
 def msg_district_alert() -> str:
     return (
-        f"{YELLOW}\n\n"
+       
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"{kam_line()}\n\n"
-        f"{YELLOW}"
+        
     )
 
 
 def msg_district_ballistic() -> str:
     return (
-        f"{RED}\n\n"
+        
         f"🚀🚀 БАЛІСТИКА — {DISTRICT_NAME.upper()} 🚀🚀\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"{kam_line()}\n\n"
-        f"{RED}"
+        
     )
 
 
 def msg_district_clear() -> str:
     return (
-        f"{GREEN}\n\n"
+        
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
-        f"{GREEN}"
+       
     )
 
 
