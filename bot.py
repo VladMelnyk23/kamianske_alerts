@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 import os
 import sqlite3
@@ -56,7 +57,8 @@ DISTRICT_BALLISTIC_REPEAT = max(1, int(env("DISTRICT_BALLISTIC_REPEAT", "3")))
 # Тривога на рівні всієї області вважається тривогою й для Кам'янського
 OBLAST_COVERS = env("OBLAST_COVERS", "1") == "1"
 TEST_KEY = env("TEST_KEY")  # пароль для /api/test (без нього тест вимкнений)
-
+# Пароль для сторінки /sessions (якщо не задано — береться TEST_KEY)
+ADMIN_KEY = env("ADMIN_KEY") or env("TEST_KEY")
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 BASE = Path(__file__).parent
 KYIV = ZoneInfo("Europe/Kyiv")
@@ -720,6 +722,142 @@ async def h_sound(_):
     return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
+# ---------- Активні сесії сторінки ----------
+SESSIONS: dict[str, dict] = {}
+SESSION_ACTIVE_SEC = 25        # немає сигналу довше — вважаємо, що сторінка не відповідає
+SESSION_KEEP_SEC = 6 * 3600    # скільки годин показувати «мертві» сесії
+SESSION_MAX = 300
+
+
+def client_ip(request: web.Request) -> str:
+    fwd = request.headers.get("X-Forwarded-For", "")
+    return (fwd.split(",")[0].strip() if fwd else (request.remote or "")) or "?"
+
+
+def clip(v, n: int) -> str:
+    return str(v or "")[:n]
+
+
+def to_int(v, default=0) -> int:
+    try:
+        return max(0, min(10**9, int(float(v))))
+    except (TypeError, ValueError):
+        return default
+
+
+async def h_heartbeat(request: web.Request):
+    """Сторінка раз на ~10 с повідомляє, що вона жива, і свій стан."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad json"}, status=400)
+    sid = clip(data.get("id"), 60)
+    if not sid:
+        return web.json_response({"error": "no id"}, status=400)
+    now = time.time()
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        if len(SESSIONS) >= SESSION_MAX:  # захист від засмічення: прибираємо найстарішу
+            oldest = min(SESSIONS, key=lambda k: SESSIONS[k]["last_seen"])
+            del SESSIONS[oldest]
+        sess = SESSIONS[sid] = {"first_seen": now}
+    sess["last_seen"] = now
+    sess["closing"] = bool(data.get("closing"))
+    if not sess["closing"]:
+        sess.update(
+            name=clip(data.get("name"), 40),
+            ua=clip(data.get("ua"), 200),
+            ip=client_ip(request),
+            sound=bool(data.get("sound")),
+            playing=bool(data.get("playing")),
+            blocked=bool(data.get("blocked")),
+            wake=bool(data.get("wake")),
+            lock=bool(data.get("lock")),
+            data_age=to_int(data.get("data_age")),
+            visible=bool(data.get("visible")),
+            standalone=bool(data.get("standalone")),
+            uptime=to_int(data.get("uptime")),
+        )
+    return web.json_response({"ok": True})
+
+
+def admin_ok(request: web.Request) -> bool:
+    key = request.query.get("key", "")
+    return bool(ADMIN_KEY) and hmac.compare_digest(key.encode(), ADMIN_KEY.encode())
+
+
+def sessions_payload() -> list[dict]:
+    now = time.time()
+    out = []
+    for sid, sess in list(SESSIONS.items()):
+        age = now - sess["last_seen"]
+        if age > SESSION_KEEP_SEC:
+            del SESSIONS[sid]
+            continue
+        problems = []
+        if not sess.get("sound"):
+            problems.append("звук вимкнено")
+        elif sess.get("blocked"):
+            problems.append("звук заблоковано браузером")
+        elif not sess.get("playing"):
+            problems.append("звук не грає")
+        if sess.get("data_age", 0) > 30:
+            problems.append(f"немає даних {sess['data_age']} с")
+        if sess.get("closing"):
+            status = "closed"
+        elif age <= SESSION_ACTIVE_SEC:
+            status = "problem" if problems else "ok"
+        else:
+            status = "offline"
+        out.append(
+            {
+                "id": sid[:8],
+                "key": sid,
+                "name": sess.get("name", ""),
+                "ip": sess.get("ip", ""),
+                "ua": sess.get("ua", ""),
+                "status": status,
+                "problems": problems,
+                "age": int(age),
+                "uptime": int(sess.get("uptime", 0) + (age if status in ("ok", "problem") else 0)),
+                "sound": bool(sess.get("sound")),
+                "playing": bool(sess.get("playing")),
+                "wake": bool(sess.get("wake")),
+                "lock": bool(sess.get("lock")),
+                "visible": bool(sess.get("visible")),
+                "standalone": bool(sess.get("standalone")),
+                "data_age": sess.get("data_age", 0),
+            }
+        )
+    order = {"problem": 0, "offline": 1, "ok": 2, "closed": 3}
+    out.sort(key=lambda r: (order[r["status"]], r["name"].lower(), r["ip"]))
+    return out
+
+
+async def h_sessions_api(request: web.Request):
+    if not admin_ok(request):
+        return web.json_response({"error": "Невірний або не заданий key (змінна ADMIN_KEY/TEST_KEY)"}, status=403)
+    return web.json_response({"sessions": sessions_payload()}, headers={"Cache-Control": "no-store"})
+
+
+async def h_sessions_clear(request: web.Request):
+    """Прибирає з переліку закриті та ті, що не відповідають."""
+    if not admin_ok(request):
+        return web.json_response({"error": "forbidden"}, status=403)
+    removed = 0
+    for row in sessions_payload():
+        if row["status"] in ("offline", "closed"):
+            SESSIONS.pop(row["key"], None)
+            removed += 1
+    return web.json_response({"ok": True, "removed": removed})
+
+
+async def h_sessions_page(request: web.Request):
+    if not admin_ok(request):
+        return web.Response(status=403, text="Доступ заборонено: додайте ?key=ПАРОЛЬ (змінна ADMIN_KEY або TEST_KEY у Railway).")
+    return web.FileResponse(BASE / "sessions.html", headers={"Cache-Control": "no-store"})
+
+
 async def h_manifest(_):
     return web.json_response(
         {
@@ -825,6 +963,10 @@ async def main():
             web.get("/api/status", h_status),
             web.get("/api/log", h_log),
             web.get("/api/test", h_test),
+            web.post("/api/heartbeat", h_heartbeat),
+            web.get("/api/sessions", h_sessions_api),
+            web.post("/api/sessions/clear", h_sessions_clear),
+            web.get("/sessions", h_sessions_page),
         ]
     )
     runner = web.AppRunner(web_app)
