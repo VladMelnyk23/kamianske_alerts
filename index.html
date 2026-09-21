@@ -3,94 +3,198 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#090c11">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Тривога">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <title>Тривога — Кам'янське</title>
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --text:#e6edf3; --muted:#8b949e; --ok:#238636; --warn:#d29922; --bad:#da3633; --line:#30363d; }
+  :root {
+    --bg:#090c11; --bg-2:#0d1117; --card:#131922; --card-2:#171e28; --border:#232b38; --border-soft:#1a212c;
+    --text:#e9edf3; --dim:#8a94a3; --faint:#525c6b;
+    --ok:#34d399; --ok-bg:#0f2019;
+    --warn:#eab308; --warn-ink:#1c1400;
+    --bad:#f4495c; --bad-ink:#2a0508;
+    --test:#38bdf8; --test-ink:#031824;
+    --radius:14px;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --display:'Space Grotesk',var(--sans);
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  main { max-width:720px; margin:0 auto; padding:20px 16px 48px; }
-  h1 { font-size:1.1rem; color:var(--muted); font-weight:500; margin:0 0 14px; }
-  .status { border-radius:16px; padding:36px 20px; text-align:center; background:var(--ok); transition:background .3s; }
-  .status.alert { background:#e3b100; color:#1a1300; animation:pulse 1.2s infinite; }
-  .status.ballistic { background:#e5202a; animation:pulse .7s infinite; }
-  .status.test { background:#1f6feb; animation:pulse 1.5s infinite; }
-  .status.error { background:#4d4d4d; }
-  .status .big { font-size:2rem; font-weight:700; }
-  .status .sub { margin-top:8px; opacity:.9; }
-  @keyframes pulse { 50% { filter:brightness(1.35); } }
-  button { margin:14px 0; padding:10px 16px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:.95rem; cursor:pointer; }
-  button.on { border-color:var(--ok); }
-  h2 { font-size:1.05rem; margin:26px 0 10px; }
-  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; font-size:.92rem; }
-  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); }
-  th { color:var(--muted); font-weight:500; }
-  tr:last-child td { border-bottom:0; }
-  .tag { padding:2px 8px; border-radius:6px; font-size:.8rem; background:var(--warn); color:#000; }
-  .tag.b { background:var(--bad); color:#fff; }
-  .tag.o { background:#6e7681; color:#fff; }
-  .pill { display:inline-block; margin-top:12px; padding:6px 12px; border-radius:999px; background:var(--card); border:1px solid var(--line); font-size:.9rem; }
-  .pill.alert { border-color:#e3b100; }
-  .pill.ballistic { border-color:#e5202a; }
-  .tag.t { background:#1f6feb; color:#fff; }
-  tr.other td { color:var(--muted); }
-  label.muted { display:block; margin:0 0 10px; }
-  .wrap { overflow-x:auto; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    margin:0; min-height:100vh; color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.45;
+    background:
+      radial-gradient(900px 480px at 50% -12%, rgba(56,80,120,.16), transparent 60%),
+      var(--bg);
+  }
+  main { max-width:640px; margin:0 auto; padding:22px 16px 56px; }
+  h1 { font-family:var(--display); font-size:1.02rem; font-weight:600; letter-spacing:.01em; color:var(--dim); margin:0 0 16px; display:flex; align-items:baseline; gap:8px; }
+  h1 span#city { color:var(--text); }
+  h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--text); margin:30px 0 10px; }
   [hidden] { display:none !important; }
-  .stale { background:#3d3000; border:1px solid #e3b100; border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:.9rem; }
-  .health { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); }
-  .health.ok { border-color:#238636; background:rgba(35,134,54,.10); }
-  .health.bad { border-color:#da3633; background:rgba(218,54,51,.12); }
-  .health .htitle { flex:1 0 100%; font-size:.9rem; font-weight:600; }
-  .health.ok .htitle { color:#3fb950; }
-  .health.bad .htitle { color:#ff7b72; }
-  .chip { display:inline-block; padding:4px 10px; border-radius:999px; font-size:.82rem; border:1px solid; white-space:nowrap; }
-  .chip.ok { color:#3fb950; border-color:#238636; background:rgba(35,134,54,.18); }
-  .chip.bad { color:#ff7b72; border-color:#da3633; background:rgba(218,54,51,.18); }
-  .chip.off { color:var(--muted); border-color:var(--line); background:transparent; }
-  #soundMsg:not(:empty) { color:#ff7b72; border:1px solid #da3633; background:rgba(218,54,51,.12); border-radius:10px; padding:8px 10px; margin:8px 0; }
-  .err { color:#ff7b72; }
-  #devName { background:var(--card); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 10px; font-size:.9rem; margin-left:6px; max-width:60vw; }
-  .hint { color:var(--muted); font-size:.82rem; line-height:1.4; margin:6px 0 4px; }
-  .muted { color:var(--muted); font-size:.85rem; }
+  .muted { color:var(--dim); font-size:.85rem; }
+
+  /* ---------- Hero status ---------- */
+  .status {
+    position:relative; overflow:hidden; border-radius:20px; padding:34px 22px;
+    text-align:center; background:linear-gradient(180deg,var(--card-2),var(--card));
+    border:1px solid var(--border); transition:background .3s,border-color .3s;
+  }
+  .status .big { font-family:var(--display); font-size:clamp(1.5rem,7vw,2rem); font-weight:700; letter-spacing:-.01em; color:var(--text); }
+  .status .sub { margin-top:8px; font-family:var(--mono); font-size:.82rem; color:var(--dim); }
+  @keyframes pulseBg { 50% { filter:brightness(1.18); } }
+
+  .status.alert { background:linear-gradient(180deg,#2a2205,#3a2e05); border-color:#5c4a08; animation:pulseBg 1.3s infinite; }
+  .status.alert .big { color:var(--warn); }
+  .status.alert .sub { color:#c9a53e; }
+
+  .status.ballistic { background:linear-gradient(180deg,#3a0b10,#4a0d13); border-color:#7a1520; animation:pulseBg .7s infinite; }
+  .status.ballistic .big { color:#ff8794; }
+  .status.ballistic .sub { color:#ef8f98; }
+
+  .status.test { background:linear-gradient(180deg,#08222f,#0b2c3d); border-color:#134a63; }
+  .status.test .big { color:var(--test); }
+
+  .status.error { background:var(--card); border-color:var(--border); border-style:dashed; }
+  .status.error .big { color:var(--dim); font-size:1.15rem; }
+
+  .stale {
+    display:flex; gap:8px; align-items:flex-start; background:var(--warn-ink); border:1px solid #4a3a06;
+    color:#e6c563; border-radius:12px; padding:11px 13px; margin:0 0 12px; font-size:.86rem; line-height:1.4;
+  }
+
+  /* ---------- District pill ---------- */
+  .pill {
+    display:inline-flex; align-items:center; gap:6px; margin-top:14px; padding:7px 14px; border-radius:999px;
+    background:var(--card); border:1px solid var(--border); font-size:.85rem; color:var(--dim);
+  }
+  .pill.alert { border-color:#5c4a08; color:var(--warn); }
+  .pill.ballistic { border-color:#7a1520; color:#ff8794; }
+
+  /* ---------- Controls ---------- */
+  .controls { display:flex; gap:10px; margin:18px 0 6px; flex-wrap:wrap; }
+  button {
+    font-family:var(--sans); font-size:.92rem; font-weight:600; cursor:pointer;
+    border-radius:12px; border:1px solid var(--border); background:var(--card); color:var(--text);
+    padding:11px 18px; transition:border-color .15s,background .15s,transform .05s;
+  }
+  button:active { transform:scale(.98); }
+  #soundBtn { flex:1 1 auto; }
+  #soundBtn.on { border-color:#1c5f42; background:var(--ok-bg); color:var(--ok); }
+  #testBtn { background:transparent; color:var(--dim); font-weight:500; }
+  #testBtn:hover { color:var(--text); border-color:var(--faint); }
+
+  .toggle-row { display:flex; align-items:center; gap:8px; margin:4px 0 16px; font-size:.85rem; color:var(--dim); }
+  .toggle-row input { accent-color:var(--ok); width:16px; height:16px; }
+
+  #soundMsg:not(:empty) {
+    color:var(--bad); border:1px solid #5c1219; background:var(--bad-ink); border-radius:10px;
+    padding:9px 11px; margin:8px 0; font-size:.85rem; line-height:1.4;
+  }
+  .err { color:var(--bad); }
+
+  /* ---------- Health / diagnostics ---------- */
+  .health {
+    margin:16px 0; padding:12px 13px; border-radius:12px; border:1px solid var(--border); background:var(--card);
+  }
+  .health .htitle { font-family:var(--display); font-size:.86rem; font-weight:600; margin-bottom:9px; }
+  .health.ok .htitle { color:var(--ok); }
+  .health.bad .htitle { color:var(--bad); }
+  .chip {
+    display:inline-flex; align-items:center; gap:5px; margin:0 6px 6px 0; padding:4px 10px;
+    border-radius:8px; font-size:.78rem; font-family:var(--mono); border:1px solid; white-space:nowrap;
+  }
+  .chip.ok { color:var(--ok); border-color:#1c5f42; background:rgba(52,211,153,.08); }
+  .chip.bad { color:var(--bad); border-color:#5c1219; background:rgba(244,73,92,.1); }
+  .chip.off { color:var(--faint); border-color:var(--border); background:transparent; }
+
+  /* ---------- Settings disclosure ---------- */
+  details {
+    border:1px solid var(--border); border-radius:12px; background:var(--card); margin:10px 0; overflow:hidden;
+  }
+  details summary {
+    cursor:pointer; padding:12px 14px; font-size:.87rem; font-weight:600; color:var(--dim);
+    list-style:none; display:flex; align-items:center; justify-content:space-between;
+  }
+  details summary::-webkit-details-marker { display:none; }
+  details summary::after { content:'+'; font-family:var(--mono); color:var(--faint); font-weight:400; }
+  details[open] summary::after { content:'–'; }
+  details .body { padding:2px 14px 14px; }
+  details ol { margin:0; padding-left:18px; color:var(--dim); font-size:.85rem; line-height:1.6; }
+  details code { font-family:var(--mono); font-size:.82em; background:var(--card-2); padding:1px 5px; border-radius:5px; }
+  label.field { display:block; font-size:.85rem; color:var(--dim); margin:8px 0 0; }
+  #devName {
+    width:100%; margin-top:6px; background:var(--card-2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:9px 11px; font-size:.9rem; font-family:var(--sans);
+  }
+  .hint { color:var(--faint); font-size:.82rem; line-height:1.5; margin:10px 0 0; }
+
+  /* ---------- Log ---------- */
+  label.filter { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--dim); margin:0 0 12px; }
+  label.filter input { accent-color:var(--test); width:16px; height:16px; }
+  .wrap { overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); font-size:.86rem; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border-soft); white-space:nowrap; }
+  td:first-child, td:nth-child(2) { font-family:var(--mono); font-size:.82rem; color:var(--dim); }
+  td:nth-child(3) { font-family:var(--mono); font-size:.82rem; }
+  td:last-child { white-space:normal; color:var(--dim); }
+  th { color:var(--faint); font-weight:500; font-size:.76rem; text-transform:uppercase; letter-spacing:.05em; }
+  tr:last-child td { border-bottom:0; }
+  tr.other td { color:var(--faint); }
+  .tag { padding:3px 9px; border-radius:7px; font-size:.75rem; font-weight:600; background:var(--warn); color:var(--warn-ink); }
+  .tag.b { background:var(--bad); color:#fff; }
+  .tag.o { background:var(--card-2); color:var(--dim); border:1px solid var(--border); }
+  .tag.t { background:var(--test); color:var(--test-ink); }
 </style>
 </head>
 <body>
 <main>
   <h1>Моніторинг тривог · <span id="city">Кам'янське</span></h1>
   <div class="stale" id="stale" hidden>⚠️ Немає свіжих даних: браузер призупинив сторінку або пропав зв'язок. Поверніться на вкладку — вона оновиться.</div>
+
   <div id="status" class="status">
     <div class="big" id="big">Завантаження…</div>
     <div class="sub" id="sub"></div>
   </div>
   <div class="pill" id="district"></div>
-  <button id="soundBtn">🔇 Увімкнути звук</button>
-  <button id="testBtn">▶ Перевірити звук</button>
-  <label class="muted"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
+
+  <div class="controls">
+    <button id="soundBtn">🔇 Увімкнути звук</button>
+    <button id="testBtn">▶ Перевірити звук</button>
+  </div>
+  <label class="toggle-row"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
   <div class="muted" id="soundMsg"></div>
-  <label class="muted">Назва пристрою (для списку сесій): <input id="devName" maxlength="40" placeholder="напр. ПК зміна 1"></label>
+
   <div class="health" id="health"></div>
-  <details class="hint">
-    <summary>Налаштування Microsoft Edge для постійної роботи</summary>
-    <ol>
-      <li><b>Сон вкладок:</b> <code>edge://settings/system</code> → «Заощаджуйте ресурси за допомогою вкладок у режимі сну» → вимкніть, або додайте цей сайт у «Ніколи не переводити ці сайти в режим сну».</li>
-      <li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту (тоді звук відновлюється сам після перезавантаження).</li>
-      <li><b>Сповіщення:</b> значок замка в адресному рядку → Сповіщення → Дозволити.</li>
-      <li><b>Режим ефективності:</b> вимкніть для цього ноутбука/ПК на живленні, а в Windows не давайте йому засинати.</li>
-      <li>Найстабільніше: Edge → «Програми» → «Установити цей сайт як програму» і працювати у вікні застосунку. На вкладці з'явиться значок 🔊 — так і має бути.</li>
-    </ol>
+
+  <details>
+    <summary>Пристрій і налаштування Edge</summary>
+    <div class="body">
+      <label class="field">Назва пристрою (для списку сесій)
+        <input id="devName" maxlength="40" placeholder="напр. ПК зміна 1">
+      </label>
+      <ol style="margin-top:14px">
+        <li><b>Сон вкладок:</b> <code>edge://settings/system</code> → «Заощаджуйте ресурси за допомогою вкладок у режимі сну» → вимкніть, або додайте цей сайт у «Ніколи не переводити ці сайти в режим сну».</li>
+        <li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту (тоді звук відновлюється сам після перезавантаження).</li>
+        <li><b>Сповіщення:</b> значок замка в адресному рядку → Сповіщення → Дозволити.</li>
+        <li><b>Режим ефективності:</b> вимкніть для цього ноутбука/ПК на живленні, а в Windows не давайте йому засинати.</li>
+        <li>Найстабільніше: Edge → «Програми» → «Установити цей сайт як програму» і працювати у вікні застосунку. На вкладці з'явиться значок 🔊 — так і має бути.</li>
+      </ol>
+    </div>
   </details>
   <div class="hint">Натисніть «Увімкнути звук» один раз: це вмикає звук сирени й режим фонової роботи (сторінка тихо тримає аудіосесію, щоб браузер її не призупиняв). Можна згорнути браузер, але не закривайте вкладку. На iPhone надійніше додати сторінку на екран «Додому» (Поділитись → На початковий екран).</div>
   <div class="muted" id="updated"></div>
 
   <h2>Журнал тривог і загроз</h2>
-  <label class="muted"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
+  <label class="filter"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
   <div class="wrap">
     <table>
       <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
@@ -196,14 +300,16 @@ player.addEventListener('ended', () => {
 
 function syncSound() {
   if (!soundOn) return;
-  if (cur === 'ok') {
+  // Сирена лунає лише при балістичній загрозі. Звичайна повітряна тривога
+  // (cur === 'alert') і стан 'ok' лишають фонову тишу — тільки колір/текст/сповіщення міняються.
+  if (cur !== 'ballistic') {
     playedFor = null;
     if (mode === 'siren') playSilence().catch(onPlayError);
     return;
   }
   if (playedFor !== cur) {
     playedFor = cur;
-    playSiren(cur === 'ballistic').then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
+    playSiren(true).then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
   }
 }
 
