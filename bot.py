@@ -284,11 +284,9 @@ def msg_ballistic() -> str:
 
 def msg_alert(suffix: str = "") -> str:
     return (
-        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
         f"Прямуйте в укриття.\n\n"
-        f"{YELLOW}"
     )
 
 
@@ -304,40 +302,32 @@ def msg_test(label: str) -> str:
 
 def msg_ballistic_clear() -> str:
     return (
-        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"🟡 Повітряна тривога триває — залишайтесь в укритті.\n\n"
-        f"{GREEN}"
     )
 
 
 def msg_district_ballistic_clear() -> str:
     return (
-        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"🟡 Повітряна тривога в районі триває.\n\n"
-        f"{GREEN}"
     )
 
 
 def msg_test_clear() -> str:
     return (
-        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ (ТЕСТ) ✅\n"
         f"📍 {CITY_NAME}\n\n"
         f"Тестову перевірку завершено.\n\n"
-        f"{GREEN}"
     )
 
 
 def msg_clear() -> str:
     return (
-        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {CITY_NAME}\n\n"
-        f"{GREEN}"
     )
 
 
