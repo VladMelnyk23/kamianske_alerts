@@ -275,11 +275,11 @@ def msg_ballistic() -> str:
 
 def msg_alert(suffix: str = "") -> str:
     return (
-        f"{YELLOW}\n\n"
+        
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
         f"Прямуйте в укриття.\n\n"
-        f"{YELLOW}"
+        
     )
 
 
