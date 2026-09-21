@@ -224,7 +224,7 @@ d_desc: dict[int, str] = {
 if d_open:
     d_state.update(active=True, ballistic=any(d_open.values()))
 tg_app: Application | None = None
-test = {"mode": None, "until": 0.0, "since": None, "id": None}
+test = {"mode": None, "until": 0.0, "since": None, "id": None, "notify": False}
 
 
 def close_test():
@@ -237,6 +237,15 @@ def close_test():
         )
         db.commit()
     test.update(mode=None, id=None)
+
+
+async def finish_test():
+    """Завершує тест; якщо він був з notify=1, шле відбій у Telegram."""
+    notify = test["notify"]
+    close_test()
+    test["notify"] = False
+    if notify:
+        await broadcast(msg_test_clear())
 
 
 def subscribers():
@@ -275,11 +284,11 @@ def msg_ballistic() -> str:
 
 def msg_alert(suffix: str = "") -> str:
     return (
-        
+        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
         f"Прямуйте в укриття.\n\n"
-        
+        f"{YELLOW}"
     )
 
 
@@ -290,6 +299,36 @@ def msg_test(label: str) -> str:
         f"📍 {CITY_NAME}\n\n"
         f"Це перевірка, реальної загрози немає.\n\n"
         f"{BLUE}"
+    )
+
+
+def msg_ballistic_clear() -> str:
+    return (
+        f"{GREEN}\n\n"
+        f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
+        f"📍 {CITY_NAME}\n\n"
+        f"🟡 Повітряна тривога триває — залишайтесь в укритті.\n\n"
+        f"{GREEN}"
+    )
+
+
+def msg_district_ballistic_clear() -> str:
+    return (
+        f"{GREEN}\n\n"
+        f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
+        f"📍 {DISTRICT_NAME}\n\n"
+        f"🟡 Повітряна тривога в районі триває.\n\n"
+        f"{GREEN}"
+    )
+
+
+def msg_test_clear() -> str:
+    return (
+        f"{GREEN}\n\n"
+        f"✅ ВІДБІЙ (ТЕСТ) ✅\n"
+        f"📍 {CITY_NAME}\n\n"
+        f"Тестову перевірку завершено.\n\n"
+        f"{GREEN}"
     )
 
 
@@ -314,11 +353,11 @@ def kam_line() -> str:
 
 def msg_district_alert() -> str:
     return (
-        f"{YELLOW}\n\n"
+        
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {DISTRICT_NAME}\n\n"
         f"{kam_line()}\n\n"
-        f"{YELLOW}"
+        
     )
 
 
@@ -416,6 +455,8 @@ def process(mine: list[dict]):
         return "alert", msg_alert(suffix)
     if was_active and not is_active:
         return "clear", msg_clear()
+    if was_ballistic and not is_bal:
+        return "ballistic_clear", msg_ballistic_clear()
     return None
 
 
@@ -462,11 +503,13 @@ def process_district(mine: list[dict]):
         return "d_alert", msg_district_alert()
     if was_active and not is_active:
         return "d_clear", msg_district_clear()
+    if was_ballistic and not is_bal:
+        return "d_ballistic_clear", msg_district_ballistic_clear()
     return None
 
 
-def process_other(others: list[dict]) -> list[dict]:
-    """Пише інші загрози в журнал (без сирени). Повертає нові події."""
+def process_other(others: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Пише інші загрози в журнал (без сирени). Повертає (нові, закриті) події."""
     current = {a["id"]: a for a in others}
     new = []
     for aid, a in current.items():
@@ -481,17 +524,21 @@ def process_other(others: list[dict]) -> list[dict]:
         elif other_open[aid] != notes:
             db.execute("UPDATE alerts SET notes=? WHERE api_id=?", (notes, aid))
         other_open[aid] = notes
+    closed = []
     for aid in [i for i in other_open if i not in current]:
+        row = db.execute("SELECT alert_type, location FROM alerts WHERE api_id=?", (aid,)).fetchone()
+        if row:
+            closed.append(dict(row))
         db.execute("UPDATE alerts SET ended_at=? WHERE api_id=?", (now_iso(), aid))
         del other_open[aid]
     db.commit()
-    return new
+    return new, closed
 
 
 async def poller(session: ClientSession):
     while True:
         if test["mode"] and time.time() >= test["until"]:
-            close_test()
+            await finish_test()
         try:
             if not ALERTS_TOKEN:
                 raise RuntimeError("ALERTS_TOKEN не задано у змінних Railway")
@@ -505,7 +552,7 @@ async def poller(session: ClientSession):
             alerts = data.get("alerts", [])
             res = process([a for a in alerts if is_siren(a)])
             dres = process_district([a for a in alerts if is_district(a)])
-            new_other = process_other([a for a in alerts if is_other(a)])
+            new_other, closed_other = process_other([a for a in alerts if is_other(a)])
             state.update(updated=now_iso(), error=None)
             if res:
                 kind, msg = res
@@ -529,6 +576,9 @@ async def poller(session: ClientSession):
                     if a.get("notes"):
                         text += f"\n{a['notes']}"
                     await broadcast(text, silent=True)
+                for c in closed_other:
+                    label = TYPE_LABELS.get(c.get("alert_type"), "Інша загроза")
+                    await broadcast(f"🟢✅ Відбій: {label} — {c.get('location')}", silent=True)
         except Exception as e:
             log.error("poll error: %s", e)
             state["error"] = str(e)
@@ -684,7 +734,7 @@ async def h_status(_):
             }
         )
     if test["mode"]:
-        close_test()
+        await finish_test()
     return web.json_response(
         {**state, "district": {**d_state, "name": DISTRICT_NAME}, "test": False, "city": CITY_NAME}
     )
@@ -699,7 +749,7 @@ async def h_test(request: web.Request):
         return web.json_response({"error": "Невірний key"}, status=403)
     kind = q.get("type", "alert")
     if kind == "off":
-        close_test()
+        await finish_test()
         return web.json_response({"ok": True, "test": "вимкнено"})
     if kind not in ("alert", "ballistic"):
         return web.json_response({"error": "type: alert | ballistic | off"}, status=400)
@@ -718,7 +768,7 @@ async def h_test(request: web.Request):
          f"ТЕСТ: {label}" + (" + Telegram" if q.get("notify") == "1" else "")),
     )
     db.commit()
-    test.update(mode=kind, until=time.time() + seconds, since=since, id=tid)
+    test.update(mode=kind, until=time.time() + seconds, since=since, id=tid, notify=q.get("notify") == "1")
     if q.get("notify") == "1":
         text = msg_test(label)
         coro = send_alert_message(
