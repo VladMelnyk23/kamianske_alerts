@@ -56,6 +56,7 @@
   .chip.off { color:var(--muted); border-color:var(--line); background:transparent; }
   #soundMsg:not(:empty) { color:#ff7b72; border:1px solid #da3633; background:rgba(218,54,51,.12); border-radius:10px; padding:8px 10px; margin:8px 0; }
   .err { color:#ff7b72; }
+  #devName { background:var(--card); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 10px; font-size:.9rem; margin-left:6px; max-width:60vw; }
   .hint { color:var(--muted); font-size:.82rem; line-height:1.4; margin:6px 0 4px; }
   .muted { color:var(--muted); font-size:.85rem; }
 </style>
@@ -73,6 +74,7 @@
   <button id="testBtn">▶ Перевірити звук</button>
   <label class="muted"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
   <div class="muted" id="soundMsg"></div>
+  <label class="muted">Назва пристрою (для списку сесій): <input id="devName" maxlength="40" placeholder="напр. ПК зміна 1"></label>
   <div class="health" id="health"></div>
   <details class="hint">
     <summary>Налаштування Microsoft Edge для постійної роботи</summary>
@@ -380,6 +382,7 @@ startTicker(() => {
   tick++;
   loadStatus();
   if (tick % 6 === 0) loadLog();
+  if (tick % 2 === 0) sendHeartbeat();
   const age = Date.now() - lastOk;
   staleEl.hidden = age < 30000;
   // Сторінка жива, але даних немає: звуковий сигнал раз на 2 хвилини після першої хвилини тиші
@@ -396,8 +399,10 @@ document.addEventListener('visibilitychange', () => {
     resumeAudio();
     refreshAll();
   }
+  sendHeartbeat();
 });
-window.addEventListener('pageshow', refreshAll);
+window.addEventListener('pagehide', () => sendHeartbeat(true));
+window.addEventListener('pageshow', () => { refreshAll(); sendHeartbeat(); });
 window.addEventListener('focus', refreshAll);
 window.addEventListener('online', refreshAll);
 
@@ -409,6 +414,46 @@ function tryReload() {
     fetch('/', {cache: 'no-store'}).then(r => {
       if (r.ok) { sessionStorage.setItem('lastReload', String(Date.now())); location.reload(); }
     }).catch(() => {});
+  } catch (e) {}
+}
+
+// ---------- Сигнал «я жива» для сторінки /sessions ----------
+const devNameEl = document.getElementById('devName');
+function tabId() {
+  try {
+    let t = sessionStorage.getItem('tabId');
+    if (!t) {
+      t = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (String(Math.random()).slice(2) + Date.now());
+      sessionStorage.setItem('tabId', t);
+    }
+    return t;
+  } catch (e) { return 'anon-' + Date.now(); }
+}
+const TAB_ID = tabId();
+const PAGE_STARTED = Date.now();
+try { devNameEl.value = localStorage.getItem('devName') || ''; } catch (e) {}
+devNameEl.onchange = () => {
+  try { localStorage.setItem('devName', devNameEl.value.trim()); } catch (e) {}
+  sendHeartbeat();
+};
+
+function sendHeartbeat(closing) {
+  const body = closing ? {id: TAB_ID, closing: true} : {
+    id: TAB_ID,
+    name: devNameEl.value.trim(),
+    ua: navigator.userAgent,
+    sound: soundOn,
+    playing: !player.paused,
+    blocked: blocked,
+    wake: !!wakeLock,
+    lock: lockOn,
+    data_age: Math.round((Date.now() - lastOk) / 1000),
+    visible: !document.hidden,
+    standalone: !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches),
+    uptime: Math.round((Date.now() - PAGE_STARTED) / 1000),
+  };
+  try {
+    fetch('/api/heartbeat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body), keepalive: true}).catch(() => {});
   } catch (e) {}
 }
 
@@ -479,6 +524,7 @@ try {
 
 renderHealth();
 refreshAll();
+sendHeartbeat();
 </script>
 </body>
 </html>
