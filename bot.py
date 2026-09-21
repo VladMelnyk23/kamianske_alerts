@@ -363,10 +363,8 @@ def msg_district_ballistic() -> str:
 
 def msg_district_clear() -> str:
     return (
-        f"{GREEN}\n\n"
         f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
         f"📍 {DISTRICT_NAME}\n\n"
-        f"{GREEN}"
     )
 
 
