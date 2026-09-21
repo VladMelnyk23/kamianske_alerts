@@ -49,6 +49,12 @@ OTHER_NOTIFY = env("OTHER_NOTIFY", "0") == "1"  # тихі повідомлен�
 # Серія повідомлень при балістиці: скільки разів і з яким інтервалом (секунди)
 BALLISTIC_REPEAT = max(1, int(env("BALLISTIC_REPEAT", "15")))
 BALLISTIC_INTERVAL = max(1.0, float(env("BALLISTIC_INTERVAL", "1")))
+# Дніпровський район: окремо стежимо, пишемо в журнал і Telegram (без сирени на сторінці)
+DISTRICT_NAME = env("DISTRICT_NAME", "Дніпровський район")
+DISTRICT_MATCH = env("DISTRICT_MATCH", "Дніпровський район")
+DISTRICT_BALLISTIC_REPEAT = max(1, int(env("DISTRICT_BALLISTIC_REPEAT", "3")))
+# Тривога на рівні всієї області вважається тривогою й для Кам'янського
+OBLAST_COVERS = env("OBLAST_COVERS", "1") == "1"
 TEST_KEY = env("TEST_KEY")  # пароль для /api/test (без нього тест вимкнений)
 
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
@@ -88,8 +94,28 @@ def norm(s) -> str:
     return (s or "").replace("’", "'").replace("ʼ", "'").replace("`", "'").lower()
 
 
+def covers_oblast(a: dict) -> bool:
+    """Тривога на рівні всієї області."""
+    return (
+        OBLAST_COVERS
+        and a.get("location_type") == "oblast"
+        and norm(OBLAST) == norm(a.get("location_oblast"))
+    )
+
+
 def is_mine(a: dict) -> bool:
+    if covers_oblast(a):
+        return True
     return norm(OBLAST) == norm(a.get("location_oblast")) and norm(LOCATION_MATCH) in norm(
+        a.get("location_title")
+    )
+
+
+def is_district(a: dict) -> bool:
+    """Повітряна тривога/балістика саме в Дніпровському районі."""
+    if a.get("alert_type") != "air_raid" and not is_ballistic(a):
+        return False
+    return norm(OBLAST) == norm(a.get("location_oblast")) and norm(DISTRICT_MATCH) in norm(
         a.get("location_title")
     )
 
@@ -159,8 +185,11 @@ db.execute("UPDATE alerts SET ended_at=? WHERE category='test' AND ended_at IS N
 db.commit()
 # Залишаємо в журналі лише записи по Кам'янському (чистимо старі чужі записи)
 if OTHER_SCOPE == "city":
-    for _r in db.execute("SELECT api_id, location FROM alerts WHERE COALESCE(category,'siren')!='test'").fetchall():
-        if norm(LOCATION_MATCH) not in norm(_r["location"]):
+    for _r in db.execute(
+        "SELECT api_id, location FROM alerts WHERE COALESCE(category,'siren') NOT IN ('test','district')"
+    ).fetchall():
+        loc = norm(_r["location"])
+        if norm(LOCATION_MATCH) not in loc and loc != norm(OBLAST):
             db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
     db.commit()
 
@@ -183,6 +212,17 @@ other_open: dict[int, str] = {
 }
 if open_ids:
     state.update(active=True, ballistic=any(open_ids.values()))
+d_state = {"active": False, "ballistic": False, "since": None}
+d_open: dict[int, bool] = {
+    r["api_id"]: bool(r["ballistic"])
+    for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL AND category='district'")
+}
+d_desc: dict[int, str] = {
+    r["api_id"]: r["notes"] or ""
+    for r in db.execute("SELECT api_id, notes FROM alerts WHERE ended_at IS NULL AND category='district'")
+}
+if d_open:
+    d_state.update(active=True, ballistic=any(d_open.values()))
 tg_app: Application | None = None
 test = {"mode": None, "until": 0.0, "since": None, "id": None}
 
@@ -262,22 +302,62 @@ def msg_clear() -> str:
     )
 
 
+def kam_line() -> str:
+    if state["ballistic"]:
+        k = "🔴 балістична загроза"
+    elif state["active"]:
+        k = "🟡 тривога"
+    else:
+        k = "🟢 зараз тихо"
+    return f"ℹ️ {CITY_NAME}: {k}"
+
+
+def msg_district_alert() -> str:
+    return (
+        f"{YELLOW}\n\n"
+        f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
+        f"📍 {DISTRICT_NAME}\n\n"
+        f"{kam_line()}\n\n"
+        f"{YELLOW}"
+    )
+
+
+def msg_district_ballistic() -> str:
+    return (
+        f"{RED}\n\n"
+        f"🚀🚀 БАЛІСТИКА — {DISTRICT_NAME.upper()} 🚀🚀\n"
+        f"📍 {DISTRICT_NAME}\n\n"
+        f"{kam_line()}\n\n"
+        f"{RED}"
+    )
+
+
+def msg_district_clear() -> str:
+    return (
+        f"{GREEN}\n\n"
+        f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
+        f"📍 {DISTRICT_NAME}\n\n"
+        f"{GREEN}"
+    )
+
+
 bg_tasks: set = set()
 
 
-async def repeat_broadcast(text: str, still_active):
-    """Шле повідомлення BALLISTIC_REPEAT разів із паузою, поки загроза триває."""
-    for i in range(BALLISTIC_REPEAT):
+async def repeat_broadcast(text: str, still_active, repeat: int | None = None):
+    """Шле повідомлення кілька разів із паузою, поки загроза триває."""
+    n = repeat or BALLISTIC_REPEAT
+    for i in range(n):
         if i and not still_active():
             break
         await broadcast(text)
-        if i < BALLISTIC_REPEAT - 1:
+        if i < n - 1:
             await asyncio.sleep(BALLISTIC_INTERVAL)
 
 
-def send_alert_message(text: str, ballistic: bool, still_active):
-    if ballistic and BALLISTIC_REPEAT > 1:
-        task = asyncio.create_task(repeat_broadcast(text, still_active))
+def send_alert_message(text: str, ballistic: bool, still_active, repeat: int | None = None):
+    if ballistic and (repeat or BALLISTIC_REPEAT) > 1:
+        task = asyncio.create_task(repeat_broadcast(text, still_active, repeat))
         bg_tasks.add(task)
         task.add_done_callback(bg_tasks.discard)
         return None
@@ -339,6 +419,52 @@ def process(mine: list[dict]):
     return None
 
 
+def process_district(mine: list[dict]):
+    """Журнал і повідомлення по Дніпровському районі (без сирени на сторінці)."""
+    was_active = bool(d_open)
+    was_ballistic = any(d_open.values())
+    current = {a["id"]: a for a in mine}
+
+    for aid, a in current.items():
+        b = is_ballistic(a)
+        if aid not in d_open:
+            db.execute(
+                "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location, notes, category)"
+                " VALUES(?,?,?,?,?,?,'district')",
+                (aid, a.get("started_at") or now_iso(), a.get("alert_type"), int(b), a.get("location_title"), describe(a)),
+            )
+            d_open[aid] = b
+        elif b and not d_open[aid]:
+            db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
+            d_open[aid] = True
+        d = describe(a)
+        if d_desc.get(aid) != d:
+            db.execute("UPDATE alerts SET notes=? WHERE api_id=?", (d, aid))
+            d_desc[aid] = d
+
+    for aid in [i for i in d_open if i not in current]:
+        db.execute("UPDATE alerts SET ended_at=? WHERE api_id=?", (now_iso(), aid))
+        del d_open[aid]
+        d_desc.pop(aid, None)
+    db.commit()
+
+    is_active = bool(d_open)
+    is_bal = any(d_open.values())
+    if is_active and not was_active:
+        d_state["since"] = now_iso()
+    if not is_active:
+        d_state["since"] = None
+    d_state.update(active=is_active, ballistic=is_bal)
+
+    if is_bal and not was_ballistic:
+        return "d_ballistic", msg_district_ballistic()
+    if is_active and not was_active:
+        return "d_alert", msg_district_alert()
+    if was_active and not is_active:
+        return "d_clear", msg_district_clear()
+    return None
+
+
 def process_other(others: list[dict]) -> list[dict]:
     """Пише інші загрози в журнал (без сирени). Повертає нові події."""
     current = {a["id"]: a for a in others}
@@ -378,11 +504,22 @@ async def poller(session: ClientSession):
                 data = await r.json()
             alerts = data.get("alerts", [])
             res = process([a for a in alerts if is_siren(a)])
+            dres = process_district([a for a in alerts if is_district(a)])
             new_other = process_other([a for a in alerts if is_other(a)])
             state.update(updated=now_iso(), error=None)
             if res:
                 kind, msg = res
                 coro = send_alert_message(msg, kind == "ballistic", lambda: state["ballistic"])
+                if coro:
+                    await coro
+            if dres:
+                dkind, dmsg = dres
+                coro = send_alert_message(
+                    dmsg,
+                    dkind == "d_ballistic",
+                    lambda: d_state["ballistic"],
+                    DISTRICT_BALLISTIC_REPEAT,
+                )
                 if coro:
                     await coro
             if OTHER_NOTIFY:
@@ -446,7 +583,13 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         t = "🟡⚠️ Триває повітряна тривога."
     else:
         t = "🟢✅ Зараз тихо."
-    await update.message.reply_text(f"{CITY_NAME}: {t}", reply_markup=MENU)
+    if d_state["ballistic"]:
+        d = "🔴🚀 Балістична загроза!"
+    elif d_state["active"]:
+        d = "🟡⚠️ Триває повітряна тривога."
+    else:
+        d = "🟢✅ Зараз тихо."
+    await update.message.reply_text(f"{CITY_NAME}: {t}\n{DISTRICT_NAME}: {d}", reply_markup=MENU)
 
 
 def fmt(iso: str | None) -> str:
@@ -469,7 +612,15 @@ def get_log(limit=50, other_limit=30):
     tests = db.execute(
         "SELECT * FROM alerts WHERE category='test' ORDER BY started_at DESC LIMIT 20"
     ).fetchall()
-    rows = [dict(r) for r in siren] + [dict(r) for r in other] + [dict(r) for r in tests]
+    district = db.execute(
+        "SELECT * FROM alerts WHERE category='district' ORDER BY started_at DESC LIMIT 30"
+    ).fetchall()
+    rows = (
+        [dict(r) for r in siren]
+        + [dict(r) for r in other]
+        + [dict(r) for r in tests]
+        + [dict(r) for r in district]
+    )
     rows.sort(key=lambda r: r["started_at"], reverse=True)
     return rows
 
@@ -481,6 +632,9 @@ async def cmd_log(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     def line(r):
         end = fmt(r["ended_at"]) if r["ended_at"] else "триває"
+        if r.get("category") == "district":
+            note = f" — {r['notes']}" if r.get("notes") else ""
+            return f"{'🔴' if r['ballistic'] else '🟡'} {DISTRICT_NAME}: {fmt(r['started_at'])} → {end}{note}"
         if r.get("category") == "test":
             return f"🔵 {fmt(r['started_at'])} → {end} {r.get('notes') or 'ТЕСТ'}"
         if r.get("category") == "other":
@@ -521,6 +675,7 @@ async def h_status(_):
         return web.json_response(
             {
                 **state,
+                "district": {**d_state, "name": DISTRICT_NAME},
                 "active": True,
                 "ballistic": test["mode"] == "ballistic",
                 "since": test["since"],
@@ -530,7 +685,9 @@ async def h_status(_):
         )
     if test["mode"]:
         close_test()
-    return web.json_response({**state, "test": False, "city": CITY_NAME})
+    return web.json_response(
+        {**state, "district": {**d_state, "name": DISTRICT_NAME}, "test": False, "city": CITY_NAME}
+    )
 
 
 async def h_test(request: web.Request):
