@@ -250,6 +250,10 @@ player.preload = 'auto';
 player.setAttribute('playsinline', '');
 let soundOn = false, cur = 'ok', playedFor = null, mode = null, blocked = false;
 let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0, srcError = null, srcUpdated = null;
+// Сирена при балістиці грає РІВНО раз, 30 секунд, при вході в цей стан — далі тиша,
+// навіть якщо загроза триває (щоб не грати безперервно всю тривогу).
+let sirenFinishedFor = null, sirenTimer = null;
+const SIREN_DURATION_MS = 30000;
 // playToken серіалізує перемикання джерела: зміна src обриває попередній play() з AbortError,
 // testUntil захищає ручну перевірку звуку від фонових перевірок (syncSound / resumeAudio / playBeep).
 let playToken = 0, testUntil = 0;
@@ -311,32 +315,47 @@ player.addEventListener('error', () => {
 // Якщо балістика ще триває — одразу піднімаємо сирену знову.
 player.addEventListener('ended', () => {
   if (!soundOn) { mode = null; return; }
-  if (cur === 'ballistic' && Date.now() >= testUntil) { playedFor = null; syncSound(); return; }
+  if (cur === 'ballistic' && sirenFinishedFor !== cur && Date.now() >= testUntil) { playedFor = null; syncSound(); return; }
   playSilence().catch(onPlayError);
 });
 
 let lastSirenFix = 0;
+function stopSirenTimer() { if (sirenTimer) { clearTimeout(sirenTimer); sirenTimer = null; } }
 function syncSound() {
   if (!soundOn) return;
   if (Date.now() < testUntil) return; // йде ручна перевірка — не чіпаємо плеєр
-  // Сирена лунає ТІЛЬКИ при балістичній загрозі й грає безперервно (loop), поки загроза активна.
+  // Сирена лунає ТІЛЬКИ при балістичній загрозі: рівно один раз, 30 секунд, у момент входу
+  // в цей стан. Далі — тиша, навіть якщо загроза ще триває (щоб не грати безперервно всю тривогу).
   // Повітряна тривога (cur === 'alert') і стан 'ok' — фонова тиша: міняються лише колір,
   // текст на головній і системне сповіщення, звуку немає.
   if (cur !== 'ballistic') {
     playedFor = null;
+    sirenFinishedFor = null;
+    stopSirenTimer();
     if (mode === 'siren') playSilence().catch(onPlayError);
     return;
   }
+  if (sirenFinishedFor === cur) return; // свої 30 секунд для цієї тривоги вже відіграно
   if (playedFor !== cur || mode !== 'siren') {
     playedFor = cur;
     lastSirenFix = Date.now();
-    playSiren(true).then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
+    stopSirenTimer();
+    playSiren(true).then(() => {
+      msg.textContent = ''; blocked = false;
+      sirenTimer = setTimeout(() => {
+        sirenTimer = null;
+        sirenFinishedFor = cur;
+        if (mode === 'siren') playSilence().catch(onPlayError);
+      }, SIREN_DURATION_MS);
+    }).catch(onPlayError);
   }
 }
 // Сторож: балістика триває, а сирена чомусь замовкла (система перервала, джерело не догрузилось) — піднімаємо.
+// Не втручається, якщо тиша настала очікувано — бо свої 30 секунд уже відіграно (sirenFinishedFor).
 function ensureSiren() {
   if (!soundOn || blocked || cur !== 'ballistic') return;
   if (Date.now() < testUntil) return;
+  if (sirenFinishedFor === cur) return;
   if (mode === 'siren' && !player.paused) return;
   if (Date.now() - lastSirenFix < 10000) return; // даємо час на завантаження, не смикаємо src щотіка
   lastSirenFix = Date.now();
