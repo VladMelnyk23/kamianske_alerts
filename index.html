@@ -251,23 +251,6 @@ function beepUrl() {
 }
 const SILENCE = silentWavUrl();
 const BEEP = beepUrl();
-// Коротке "пі" щосекунди впродовж 30 с — для ракетної загрози (менш тривожне за суцільну сирену)
-function pingWavUrl() {
-  const rate = 8000, n = rate; // рівно 1 секунда — при loop=true звучить як періодичне пілікання
-  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
-  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-  w(36, 'data'); v.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) {
-    const t = i / rate;
-    const on = t < 0.16; // короткий "пі" на початку кожної секунди, решта — тиша
-    v.setInt16(44 + i * 2, on ? Math.round(12000 * Math.sin(2 * Math.PI * 1300 * t)) : 0, true);
-  }
-  return URL.createObjectURL(new Blob([buf], {type: 'audio/wav'}));
-}
-const PING = pingWavUrl();
 const ALARM_SRC = '/alarm.mp3';
 const player = new Audio();
 player.preload = 'auto';
@@ -323,7 +306,7 @@ function playSiren(loop) {
 }
 function playPing(loop) {
   mode = 'ping';
-  return playSrc(PING, loop);
+  return playSrc(ALARM_SRC, loop); // та сама сирена, що й для балістики
 }
 // Сигнал втрати зв'язку (не перебиває сирену й ручну перевірку)
 function playBeep() {
