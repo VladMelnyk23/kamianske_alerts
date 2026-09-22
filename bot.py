@@ -247,10 +247,28 @@ THREAT_TYPE_LABELS = {
 }
 
 
+# Конкретні типи боєприпасів, які API не виносить в окреме структуроване поле
+# threat_type (там лише загальні категорії) — ловимо з тексту notes, якщо джерело
+# їх там згадує. Додаються ЗАВЖДИ, навіть якщо вже є структурована мітка (Балістика/
+# Крилаті ракети): уточнюють, ЩО САМЕ за боєприпас, а не замінюють загальну категорію.
+SPECIFIC_KEYWORDS = [
+    ("циркон", "Циркон"),
+    ("кинджал", "Кинджал"),
+    ("іскандер-м", "Іскандер-М"),
+    ("іскандер", "Іскандер"),
+    ("kn-23", "KN-23"),
+    ("кн-23", "KN-23"),
+    ("реактивний шахед", "Реактивний шахед"),
+    ("шахед з реактивним двигуном", "Реактивний шахед"),
+    ("шахед-реактив", "Реактивний шахед"),
+]
+
+
 def threat_labels(a: dict) -> list[str]:
     """Мітки типів загрози: спершу зі структурованого threats[] (з позначкою червоний/
     жовтий рівень саме ЦІЄЇ загрози), і лише якщо його немає — резервний пошук
-    ключових слів у тексті notes."""
+    ключових слів у тексті notes. Далі ЗАВЖДИ додатково уточнюємо конкретний
+    боєприпас (Циркон, Кинджал, реактивний шахед тощо), якщо він згаданий у notes."""
     out = []
     for t in (a.get("threats") or []):
         label = THREAT_TYPE_LABELS.get(t.get("threat_type"))
@@ -260,15 +278,22 @@ def threat_labels(a: dict) -> list[str]:
         full = f"{mark} {label}"
         if full not in out:
             out.append(full)
-    if out:
-        return out
+
+    if not out:
+        text = norm(a.get("notes"))
+        fallback = ["🚀 Балістика/аеробалістика"] if is_ballistic(a) else []
+        for kw, label in THREAT_KEYWORDS:
+            if kw in text and label not in fallback:
+                fallback.append(label)
+        out = fallback
 
     text = norm(a.get("notes"))
-    fallback = ["🚀 Балістика/аеробалістика"] if is_ballistic(a) else []
-    for kw, label in THREAT_KEYWORDS:
-        if kw in text and label not in fallback:
-            fallback.append(label)
-    return fallback
+    mark = "🔴" if is_red(a) else "🟡"
+    for kw, label in SPECIFIC_KEYWORDS:
+        if kw in text and not any(label in existing for existing in out):
+            out.append(f"{mark} {label}")
+
+    return out
 
 
 def describe(a: dict, place: str | None = None) -> str:
