@@ -149,6 +149,16 @@ BALLISTIC_KEYWORDS = (
 # (значення поля threats[].threat_type за офіційною документацією devs.alerts.in.ua)
 BALLISTIC_THREAT_TYPES = {"ballistic_missiles"}
 
+# Ракетна загроза без підтвердженого типу "ballistic_missiles" (найчастіше саме так
+# API позначає масовані ракетні атаки, поки джерело ще не уточнило тип ракет).
+# Це НЕ прирівнюється до балістики (щоб не спамити Telegram хибно), але отримує
+# власний, менш тривожний звуковий сигнал на сторінці (див. index.html).
+MISSILE_THREAT_TYPES = {"cruise_missiles", "unspecified_missiles"}
+
+
+def is_missile(a: dict) -> bool:
+    return any(t.get("threat_type") in MISSILE_THREAT_TYPES for t in (a.get("threats") or []))
+
 # Рівні тривоги за офіційним API (alert_level і threats[].level): red / yellow.
 # ВАЖЛИВО: red НЕ прирівнюється автоматично до балістики — крилаті ракети чи масована
 # хвиля дронів теж можуть мати red, а сирена/Telegram-спам мають лишатись лише для
@@ -227,7 +237,7 @@ THREAT_KEYWORDS = [
 THREAT_TYPE_LABELS = {
     "ballistic_missiles": "Балістика",
     "cruise_missiles": "Крилаті ракети",
-    "unspecified_missiles": "Ракети",
+    "unspecified_missiles": "Ракетна загроза",
     "drones": "БпЛА",
     "guided_aerial_bombs": "КАБи",
     "tactic_aircraft_activity": "Тактична авіація",
@@ -261,15 +271,17 @@ def threat_labels(a: dict) -> list[str]:
     return fallback
 
 
-def describe(a: dict) -> str:
-    """Коментар до тривоги: тип загрози (шахеди, балістика...) або примітка з API."""
+def describe(a: dict, place: str | None = None) -> str:
+    """Коментар до тривоги: тип загрози (шахеди, балістика...) або примітка з API.
+    Якщо задано place — коментар починається з "м. {place}: ", щоб у журналі
+    було одразу видно локацію, а не лише тип загрози."""
     labels = threat_labels(a)
     if labels:
-        return ", ".join(labels)
-    notes = (a.get("notes") or "").strip()
-    if notes:
-        return notes
-    return TYPE_LABELS.get(a.get("alert_type"), "Повітряна тривога")
+        text = ", ".join(labels)
+    else:
+        notes = (a.get("notes") or "").strip()
+        text = notes or TYPE_LABELS.get(a.get("alert_type"), "Повітряна тривога")
+    return f"м. {place}: {text}" if place else text
 
 
 # ---------- Стан ----------
@@ -286,7 +298,7 @@ if OTHER_SCOPE == "city":
             db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
     db.commit()
 
-state = {"active": False, "ballistic": False, "red": False, "since": None, "updated": None, "error": None, "labels": []}
+state = {"active": False, "ballistic": False, "missile": False, "red": False, "since": None, "updated": None, "error": None, "labels": []}
 open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute(
@@ -319,7 +331,7 @@ def update_raion(mine: list[dict]):
         r_state["since"] = None
 
 
-d_state = {"active": False, "ballistic": False, "red": False, "since": None, "labels": []}
+d_state = {"active": False, "ballistic": False, "missile": False, "red": False, "since": None, "labels": []}
 d_open: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL AND category='district'")
@@ -373,79 +385,56 @@ async def broadcast(text: str, silent: bool = False):
 
 
 # ---------- Оформлення повідомлень ----------
-RED = "🔴🚨" * 7      # балістика
-YELLOW = "🟡⚠️" * 7   # повітряна тривога
-BLUE = "🔵🧪" * 7     # тест
-GREEN = "🟢✅" * 7    # відбій
-
-
 def msg_ballistic(suffix: str = "") -> str:
     return (
-        f"{RED}\n{RED}\n\n"
-        f"🚀🚀 БАЛІСТИЧНА ЗАГРОЗА 🚀🚀\n"
+        f"🚀 БАЛІСТИЧНА ЗАГРОЗА 🚀\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
-        f"❗❗ НЕГАЙНО В УКРИТТЯ! ❗❗\n\n"
-        f"{RED}\n{RED}"
+        f"❗ НЕГАЙНО В УКРИТТЯ! ❗"
     )
 
 
 def msg_alert(suffix: str = "") -> str:
     return (
-        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {CITY_NAME}{suffix}\n\n"
-        f"Прямуйте в укриття.\n\n"
-        f"{YELLOW}"
+        f"Прямуйте в укриття."
     )
 
 
 def msg_test(label: str) -> str:
     return (
-        f"{BLUE}\n\n"
         f"🧪 ТЕСТ: {label} 🧪\n"
         f"📍 {CITY_NAME}\n\n"
-        f"Це перевірка, реальної загрози немає.\n\n"
-        f"{BLUE}"
+        f"Це перевірка, реальної загрози немає."
     )
 
 
 def msg_ballistic_clear() -> str:
     return (
-        f"{GREEN}\n\n"
-        f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
+        f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ\n"
         f"📍 {CITY_NAME}\n\n"
-        f"🟡 Повітряна тривога триває — залишайтесь в укритті.\n\n"
-        f"{GREEN}"
+        f"🟡 Повітряна тривога триває — залишайтесь в укритті."
     )
 
 
 def msg_district_ballistic_clear() -> str:
     return (
-        f"{GREEN}\n\n"
-        f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ ✅\n"
+        f"✅ ВІДБІЙ БАЛІСТИЧНОЇ ЗАГРОЗИ\n"
         f"📍 {DISTRICT_NAME}\n\n"
-        f"🟡 Повітряна тривога в районі триває.\n\n"
-        f"{GREEN}"
+        f"🟡 Повітряна тривога в районі триває."
     )
 
 
 def msg_test_clear() -> str:
     return (
-        f"{GREEN}\n\n"
-        f"✅ ВІДБІЙ (ТЕСТ) ✅\n"
+        f"✅ ВІДБІЙ (ТЕСТ)\n"
         f"📍 {CITY_NAME}\n\n"
-        f"Тестову перевірку завершено.\n\n"
-        f"{GREEN}"
+        f"Тестову перевірку завершено."
     )
 
 
 def msg_clear() -> str:
-    return (
-        f"{GREEN}\n\n"
-        f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
-        f"📍 {CITY_NAME}\n\n"
-        f"{GREEN}"
-    )
+    return f"✅ ВІДБІЙ ТРИВОГИ\n📍 {CITY_NAME}"
 
 
 def kam_line() -> str:
@@ -460,31 +449,22 @@ def kam_line() -> str:
 
 def msg_district_alert(suffix: str = "") -> str:
     return (
-        f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
         f"📍 {DISTRICT_NAME}{suffix}\n\n"
-        f"{kam_line()}\n\n"
-        f"{YELLOW}"
+        f"{kam_line()}"
     )
 
 
 def msg_district_ballistic(suffix: str = "") -> str:
     return (
-        f"{RED}\n\n"
-        f"🚀🚀 БАЛІСТИКА — {DISTRICT_NAME.upper()} 🚀🚀\n"
+        f"🚀 БАЛІСТИКА — {DISTRICT_NAME.upper()} 🚀\n"
         f"📍 {DISTRICT_NAME}{suffix}\n\n"
-        f"{kam_line()}\n\n"
-        f"{RED}"
+        f"{kam_line()}"
     )
 
 
 def msg_district_clear() -> str:
-    return (
-        f"{GREEN}\n\n"
-        f"✅ ВІДБІЙ ТРИВОГИ ✅\n"
-        f"📍 {DISTRICT_NAME}\n\n"
-        f"{GREEN}"
-    )
+    return f"✅ ВІДБІЙ ТРИВОГИ\n📍 {DISTRICT_NAME}"
 
 
 bg_tasks: set = set()
@@ -532,7 +512,7 @@ def process(mine: list[dict]):
                     a.get("alert_type"),
                     int(b),
                     a.get("location_title"),
-                    describe(a),
+                    describe(a, place=CITY_NAME),
                 ),
             )
             open_ids[aid] = b
@@ -543,7 +523,7 @@ def process(mine: list[dict]):
             )
             db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
             open_ids[aid] = True
-        d = describe(a)
+        d = describe(a, place=CITY_NAME)
         if siren_desc.get(aid) != d:
             db.execute("UPDATE alerts SET notes=? WHERE api_id=?", (d, aid))
             siren_desc[aid] = d
@@ -560,7 +540,7 @@ def process(mine: list[dict]):
         state["since"] = now_iso()
     if not is_active:
         state["since"] = None
-    state.update(active=is_active, ballistic=is_bal, red=any(is_red(a) for a in mine))
+    state.update(active=is_active, ballistic=is_bal, red=any(is_red(a) for a in mine), missile=any(is_missile(a) for a in mine))
 
     labels = sorted({l for a in mine for l in threat_labels(a)})
     state["labels"] = labels
@@ -619,7 +599,7 @@ def process_district(mine: list[dict]):
         d_state["since"] = now_iso()
     if not is_active:
         d_state["since"] = None
-    d_state.update(active=is_active, ballistic=is_bal, red=any(is_red(a) for a in mine))
+    d_state.update(active=is_active, ballistic=is_bal, red=any(is_red(a) for a in mine), missile=any(is_missile(a) for a in mine))
 
     d_labels = sorted({l for a in mine for l in threat_labels(a)})
     d_state["labels"] = d_labels
@@ -1053,6 +1033,10 @@ async def h_icon(_):
 
 async def h_status(_):
     if test["mode"] and time.time() < test["until"]:
+        test_label = {
+            "ballistic": "ТЕСТ: балістика",
+            "missile": "ТЕСТ: ракетна загроза",
+        }.get(test["mode"], "ТЕСТ: повітряна тривога")
         return web.json_response(
             {
                 **state,
@@ -1065,9 +1049,10 @@ async def h_status(_):
                 },
                 "active": True,
                 "ballistic": test["mode"] == "ballistic",
-                "red": test["mode"] == "ballistic",
+                "missile": test["mode"] == "missile",
+                "red": test["mode"] in ("ballistic", "missile"),
                 "since": test["since"],
-                "labels": ["ТЕСТ: балістика" if test["mode"] == "ballistic" else "ТЕСТ: повітряна тривога"],
+                "labels": [test_label],
                 "test": True,
                 "city": CITY_NAME,
             }
@@ -1086,7 +1071,7 @@ async def h_status(_):
 
 
 async def h_test(request: web.Request):
-    """/api/test?key=ПАРОЛЬ&type=alert|ballistic|off&seconds=60&notify=1"""
+    """/api/test?key=ПАРОЛЬ&type=alert|missile|ballistic|off&seconds=60&notify=1"""
     if not TEST_KEY:
         return web.json_response({"error": "Задайте змінну TEST_KEY у Railway"}, status=403)
     q = request.query
@@ -1096,14 +1081,14 @@ async def h_test(request: web.Request):
     if kind == "off":
         await finish_test()
         return web.json_response({"ok": True, "test": "вимкнено"})
-    if kind not in ("alert", "ballistic"):
-        return web.json_response({"error": "type: alert | ballistic | off"}, status=400)
+    if kind not in ("alert", "missile", "ballistic"):
+        return web.json_response({"error": "type: alert | missile | ballistic | off"}, status=400)
     try:
         seconds = min(600, max(10, int(q.get("seconds", "60"))))
     except ValueError:
         seconds = 60
     close_test()  # закриваємо попередній тест, якщо ще йде
-    label = "балістична загроза" if kind == "ballistic" else "повітряна тривога"
+    label = {"ballistic": "балістична загроза", "missile": "ракетна загроза"}.get(kind, "повітряна тривога")
     tid = -int(time.time() * 1000)  # від'ємний id, щоб не перетинатись з API
     since = now_iso()
     db.execute(
