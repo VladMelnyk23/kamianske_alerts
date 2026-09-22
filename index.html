@@ -54,6 +54,9 @@ h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--te
 .status.alert { background:linear-gradient(180deg,#2a2205,#3a2e05); border-color:#5c4a08; animation:pulseBg 1.3s infinite; }
 .status.alert .big { color:var(--warn); }
 .status.alert .sub { color:#c9a53e; }
+.status.missile { background:linear-gradient(180deg,#331c05,#432405); border-color:#7a4a10; animation:pulseBg 1s infinite; }
+.status.missile .big { color:#ffa557; }
+.status.missile .sub { color:#e0a15e; }
 .status.ballistic { background:linear-gradient(180deg,#3a0b10,#4a0d13); border-color:#7a1520; animation:pulseBg .7s infinite; }
 .status.ballistic .big { color:#ff8794; }
 .status.ballistic .sub { color:#ef8f98; }
@@ -69,6 +72,7 @@ h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--te
   border:1.5px solid; letter-spacing:.01em;
 }
 .threat .pill.warn { color:#ffe08a; border-color:#8a6d10; background:rgba(234,179,8,.18); }
+.threat .pill.ping { color:#ffc394; border-color:#8a5410; background:rgba(234,140,8,.18); animation:pulseBg 1.1s infinite; }
 .threat .pill.bad { color:#ffb3ba; border-color:#a02332; background:rgba(244,73,92,.2); animation:pulseBg .8s infinite; }
 .threat .pill.test { color:#bfe9fb; border-color:#1f6f92; background:rgba(56,189,248,.16); }
 
@@ -145,6 +149,8 @@ td:last-child { white-space:normal; color:var(--dim); font-weight:600; }
 th { color:var(--faint); font-weight:500; font-size:.76rem; text-transform:uppercase; letter-spacing:.05em; }
 tr:last-child td { border-bottom:0; }
 tr.other td { color:var(--faint); font-weight:400; }
+#logToggle { width:100%; margin-top:10px; background:transparent; color:var(--dim); border:1px dashed var(--border); }
+#logToggle:hover { color:var(--text); border-color:var(--faint); }
 .tag { padding:3px 9px; border-radius:7px; font-size:.75rem; font-weight:600; background:var(--warn); color:var(--warn-ink); }
 .tag.b { background:var(--bad); color:#fff; }
 .tag.o { background:var(--card-2); color:var(--dim); border:1px solid var(--border); }
@@ -200,6 +206,7 @@ tr.other td { color:var(--faint); font-weight:400; }
 <tbody id="log"><tr><td colspan="5" class="muted">Завантаження…</td></tr></tbody>
 </table>
 </div>
+<button id="logToggle" hidden>Показати ще</button>
 </main>
 <script>
 const TZ = 'Europe/Kyiv';
@@ -244,16 +251,35 @@ function beepUrl() {
 }
 const SILENCE = silentWavUrl();
 const BEEP = beepUrl();
+// Коротке "пі" щосекунди впродовж 30 с — для ракетної загрози (менш тривожне за суцільну сирену)
+function pingWavUrl() {
+  const rate = 8000, n = rate; // рівно 1 секунда — при loop=true звучить як періодичне пілікання
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const t = i / rate;
+    const on = t < 0.16; // короткий "пі" на початку кожної секунди, решта — тиша
+    v.setInt16(44 + i * 2, on ? Math.round(12000 * Math.sin(2 * Math.PI * 1300 * t)) : 0, true);
+  }
+  return URL.createObjectURL(new Blob([buf], {type: 'audio/wav'}));
+}
+const PING = pingWavUrl();
 const ALARM_SRC = '/alarm.mp3';
 const player = new Audio();
 player.preload = 'auto';
 player.setAttribute('playsinline', '');
 let soundOn = false, cur = 'ok', playedFor = null, mode = null, blocked = false;
 let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0, srcError = null, srcUpdated = null;
-// Сирена при балістиці грає РІВНО раз, 30 секунд, при вході в цей стан — далі тиша,
-// навіть якщо загроза триває (щоб не грати безперервно всю тривогу).
+// Сирена при балістиці й пілікання при ракетній загрозі грають РІВНО раз, 30 секунд,
+// при вході у відповідний стан — далі тиша, навіть якщо загроза триває.
 let sirenFinishedFor = null, sirenTimer = null;
+let pingedFor = null, pingFinishedFor = null, pingTimer = null;
 const SIREN_DURATION_MS = 30000;
+const PING_DURATION_MS = 30000;
 // playToken серіалізує перемикання джерела: зміна src обриває попередній play() з AbortError,
 // testUntil захищає ручну перевірку звуку від фонових перевірок (syncSound / resumeAudio / playBeep).
 let playToken = 0, testUntil = 0;
@@ -295,6 +321,10 @@ function playSiren(loop) {
   mode = 'siren';
   return playSrc(ALARM_SRC, loop);
 }
+function playPing(loop) {
+  mode = 'ping';
+  return playSrc(PING, loop);
+}
 // Сигнал втрати зв'язку (не перебиває сирену й ручну перевірку)
 function playBeep() {
   if (!soundOn || blocked || cur !== 'ok' || mode === 'siren') return;
@@ -316,51 +346,81 @@ player.addEventListener('error', () => {
 player.addEventListener('ended', () => {
   if (!soundOn) { mode = null; return; }
   if (cur === 'ballistic' && sirenFinishedFor !== cur && Date.now() >= testUntil) { playedFor = null; syncSound(); return; }
+  if (cur === 'missile' && pingFinishedFor !== cur && Date.now() >= testUntil) { pingedFor = null; syncSound(); return; }
   playSilence().catch(onPlayError);
 });
 
-let lastSirenFix = 0;
+let lastSirenFix = 0, lastPingFix = 0;
 function stopSirenTimer() { if (sirenTimer) { clearTimeout(sirenTimer); sirenTimer = null; } }
+function stopPingTimer() { if (pingTimer) { clearTimeout(pingTimer); pingTimer = null; } }
 function syncSound() {
   if (!soundOn) return;
   if (Date.now() < testUntil) return; // йде ручна перевірка — не чіпаємо плеєр
-  // Сирена лунає ТІЛЬКИ при балістичній загрозі: рівно один раз, 30 секунд, у момент входу
-  // в цей стан. Далі — тиша, навіть якщо загроза ще триває (щоб не грати безперервно всю тривогу).
-  // Повітряна тривога (cur === 'alert') і стан 'ok' — фонова тиша: міняються лише колір,
-  // текст на головній і системне сповіщення, звуку немає.
-  if (cur !== 'ballistic') {
-    playedFor = null;
-    sirenFinishedFor = null;
-    stopSirenTimer();
-    if (mode === 'siren') playSilence().catch(onPlayError);
+
+  if (cur !== 'ballistic') { playedFor = null; sirenFinishedFor = null; stopSirenTimer(); }
+  if (cur !== 'missile') { pingedFor = null; pingFinishedFor = null; stopPingTimer(); }
+
+  // Балістика: сирена рівно один раз, 30 секунд, при вході в цей стан.
+  if (cur === 'ballistic') {
+    if (sirenFinishedFor === cur) { if (mode === 'siren') playSilence().catch(onPlayError); return; }
+    if (playedFor !== cur || mode !== 'siren') {
+      playedFor = cur;
+      lastSirenFix = Date.now();
+      stopSirenTimer();
+      playSiren(true).then(() => {
+        msg.textContent = ''; blocked = false;
+        sirenTimer = setTimeout(() => {
+          sirenTimer = null;
+          sirenFinishedFor = cur;
+          if (mode === 'siren') playSilence().catch(onPlayError);
+        }, SIREN_DURATION_MS);
+      }).catch(onPlayError);
+    }
     return;
   }
-  if (sirenFinishedFor === cur) return; // свої 30 секунд для цієї тривоги вже відіграно
-  if (playedFor !== cur || mode !== 'siren') {
-    playedFor = cur;
-    lastSirenFix = Date.now();
-    stopSirenTimer();
-    playSiren(true).then(() => {
-      msg.textContent = ''; blocked = false;
-      sirenTimer = setTimeout(() => {
-        sirenTimer = null;
-        sirenFinishedFor = cur;
-        if (mode === 'siren') playSilence().catch(onPlayError);
-      }, SIREN_DURATION_MS);
-    }).catch(onPlayError);
+
+  // Ракетна загроза (крилаті/невизначені ракети): коротке пілікання рівно один раз, 30 секунд.
+  if (cur === 'missile') {
+    if (pingFinishedFor === cur) { if (mode === 'ping') playSilence().catch(onPlayError); return; }
+    if (pingedFor !== cur || mode !== 'ping') {
+      pingedFor = cur;
+      lastPingFix = Date.now();
+      stopPingTimer();
+      playPing(true).then(() => {
+        msg.textContent = ''; blocked = false;
+        pingTimer = setTimeout(() => {
+          pingTimer = null;
+          pingFinishedFor = cur;
+          if (mode === 'ping') playSilence().catch(onPlayError);
+        }, PING_DURATION_MS);
+      }).catch(onPlayError);
+    }
+    return;
   }
+
+  // Звичайна повітряна тривога і "тихо" — без звуку, лише фонова тиша.
+  if (mode === 'siren' || mode === 'ping') playSilence().catch(onPlayError);
 }
-// Сторож: балістика триває, а сирена чомусь замовкла (система перервала, джерело не догрузилось) — піднімаємо.
-// Не втручається, якщо тиша настала очікувано — бо свої 30 секунд уже відіграно (sirenFinishedFor).
+// Сторож: якщо звук чомусь замовк не за розкладом (система перервала, джерело не догрузилось) — піднімаємо.
+// Не втручається, якщо тиша настала очікувано — бо свої 30 секунд уже відіграно.
 function ensureSiren() {
-  if (!soundOn || blocked || cur !== 'ballistic') return;
+  if (!soundOn || blocked) return;
   if (Date.now() < testUntil) return;
-  if (sirenFinishedFor === cur) return;
-  if (mode === 'siren' && !player.paused) return;
-  if (Date.now() - lastSirenFix < 10000) return; // даємо час на завантаження, не смикаємо src щотіка
-  lastSirenFix = Date.now();
-  playedFor = null;
-  syncSound();
+  if (cur === 'ballistic') {
+    if (sirenFinishedFor === cur) return;
+    if (mode === 'siren' && !player.paused) return;
+    if (Date.now() - lastSirenFix < 10000) return; // даємо час на завантаження, не смикаємо src щотіка
+    lastSirenFix = Date.now();
+    playedFor = null;
+    syncSound();
+  } else if (cur === 'missile') {
+    if (pingFinishedFor === cur) return;
+    if (mode === 'ping' && !player.paused) return;
+    if (Date.now() - lastPingFix < 10000) return;
+    lastPingFix = Date.now();
+    pingedFor = null;
+    syncSound();
+  }
 }
 // Аудіо могло бути перервано системою (дзвінок, блокування) — відновлюємо
 function resumeAudio() {
@@ -372,6 +432,7 @@ function resumeAudio() {
   if (player.paused || blocked) {
     blocked = false;
     playedFor = null;
+    pingedFor = null;
     mode = null;
     playSilence().then(syncSound).catch(onPlayError);
   }
@@ -460,9 +521,12 @@ async function loadStatus() {
 
     const prev = cur;
     cur = 'ok';
-    if (s.ballistic) cur = 'ballistic'; else if (s.active) cur = 'alert';
+    if (s.ballistic) cur = 'ballistic';
+    else if (s.missile) cur = 'missile';
+    else if (s.active) cur = 'alert';
     box.className = 'status ' + (s.test ? 'test' : (cur === 'ok' ? '' : cur));
     if (cur === 'ballistic') { big.textContent = '🚀 БАЛІСТИЧНА ЗАГРОЗА'; sub.textContent = 'Негайно в укриття! З ' + fmt(s.since); }
+    else if (cur === 'missile') { big.textContent = '📡 РАКЕТНА ЗАГРОЗА'; sub.textContent = 'З ' + fmt(s.since); }
     else if (cur === 'alert') { big.textContent = '⚠️ ПОВІТРЯНА ТРИВОГА'; sub.textContent = 'З ' + fmt(s.since); }
     else { big.textContent = '✅ Зараз тихо'; sub.textContent = ''; }
     if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
@@ -474,7 +538,7 @@ async function loadStatus() {
     threatBox.replaceChildren();
     if (labels.length && cur !== 'ok') {
       threatBox.hidden = false;
-      const kind = s.test ? 'test' : (cur === 'ballistic' ? 'bad' : 'warn');
+      const kind = s.test ? 'test' : (cur === 'ballistic' ? 'bad' : cur === 'missile' ? 'ping' : 'warn');
       for (const l of labels) {
         const p = document.createElement('span');
         p.className = 'pill ' + kind;
@@ -487,11 +551,12 @@ async function loadStatus() {
 
     // Дніпровський район свідомо не виводиться на головний екран —
     // ці події лишаються лише в журналі нижче.
-    const label = cur === 'ballistic' ? '🔴 БАЛІСТИКА' : cur === 'alert' ? '🟡 ТРИВОГА' : '🟢 Тихо';
+    const label = cur === 'ballistic' ? '🔴 БАЛІСТИКА' : cur === 'missile' ? '📡 РАКЕТИ' : cur === 'alert' ? '🟡 ТРИВОГА' : '🟢 Тихо';
     updateTitle((s.test ? '🔵 ТЕСТ · ' : '') + label + ' · ' + s.city, label);
     if (cur !== prev && cur !== 'ok') {
       const kindText = labels.length ? labels.join(', ') + ' — ' : '';
-      notify(s.city, kindText + (cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!'), cur === 'ballistic');
+      const bodyText = cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : cur === 'missile' ? 'РАКЕТНА ЗАГРОЗА!' : 'Повітряна тривога!';
+      notify(s.city, kindText + bodyText, cur === 'ballistic' || cur === 'missile');
     }
 
     srcError = s.error || null;
@@ -512,20 +577,37 @@ async function loadStatus() {
 }
 
 let showOther = true;
+let logExpanded = false;
+const LOG_VISIBLE = 5;
 document.getElementById('otherToggle').onchange = e => { showOther = e.target.checked; loadLog(); };
+document.getElementById('logToggle').onclick = () => {
+  logExpanded = !logExpanded;
+  const extra = document.querySelectorAll('#log tr.extra');
+  extra.forEach(tr => { tr.style.display = logExpanded ? '' : 'none'; });
+  document.getElementById('logToggle').textContent = logExpanded ? '▲ Згорнути' : `▼ Показати ще ${extra.length}`;
+};
 const TYPES = {air_raid:'Повітряна', chemical:'Хімічна', radiation:'Радіаційна', other:'Інша'};
 async function loadLog() {
   const tbody = document.getElementById('log');
+  const toggleBtn = document.getElementById('logToggle');
   try {
     let rows = await (await fetch('/api/log')).json();
     rows = rows.filter(r => showOther || (r.category !== 'other' && r.category !== 'district'));
     tbody.innerHTML = '';
-    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted">Записів ще немає</td></tr>'; return; }
-    for (const r of rows) {
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Записів ще немає</td></tr>';
+      toggleBtn.hidden = true;
+      return;
+    }
+    rows.forEach((r, idx) => {
       const other = r.category === 'other';
       const isTest = r.category === 'test';
       const tr = document.createElement('tr');
       if (other || isTest) tr.className = 'other';
+      if (idx >= LOG_VISIBLE) {
+        tr.classList.add('extra');
+        tr.style.display = logExpanded ? '' : 'none';
+      }
       const cells = [fmt(r.started_at), r.ended_at ? fmt(r.ended_at) : 'триває', dur(r.started_at, r.ended_at)];
       for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
       const td = document.createElement('td');
@@ -538,6 +620,12 @@ async function loadLog() {
       cm.textContent = (other || r.category === 'district') ? [r.location, r.notes].filter(Boolean).join(' — ') : (r.notes || '');
       tr.appendChild(cm);
       tbody.appendChild(tr);
+    });
+    if (rows.length > LOG_VISIBLE) {
+      toggleBtn.hidden = false;
+      toggleBtn.textContent = logExpanded ? '▲ Згорнути' : `▼ Показати ще ${rows.length - LOG_VISIBLE}`;
+    } else {
+      toggleBtn.hidden = true;
     }
   } catch (e) {}
 }
