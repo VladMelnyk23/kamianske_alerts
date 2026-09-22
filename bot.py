@@ -258,7 +258,7 @@ if OTHER_SCOPE == "city":
             db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
     db.commit()
 
-state = {"active": False, "ballistic": False, "since": None, "updated": None, "error": None}
+state = {"active": False, "ballistic": False, "since": None, "updated": None, "error": None, "labels": []}
 open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute(
@@ -277,20 +277,21 @@ other_open: dict[int, str] = {
 }
 if open_ids:
     state.update(active=True, ballistic=any(open_ids.values()))
-r_state = {"active": False, "ballistic": False, "since": None}  # Кам'янський район (лише для сторінки)
+r_state = {"active": False, "ballistic": False, "since": None, "labels": []}  # Кам'янський район (лише для сторінки)
 
 
 def update_raion(mine: list[dict]):
     was = r_state["active"]
     r_state["active"] = bool(mine)
     r_state["ballistic"] = any(is_ballistic(a) for a in mine)
+    r_state["labels"] = sorted({l for a in mine for l in threat_labels(a)})
     if r_state["active"] and not was:
         r_state["since"] = now_iso()
     if not r_state["active"]:
         r_state["since"] = None
 
 
-d_state = {"active": False, "ballistic": False, "since": None}
+d_state = {"active": False, "ballistic": False, "since": None, "labels": []}
 d_open: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL AND category='district'")
@@ -350,11 +351,11 @@ BLUE = "🔵🧪" * 7     # тест
 GREEN = "🟢✅" * 7    # відбій
 
 
-def msg_ballistic() -> str:
+def msg_ballistic(suffix: str = "") -> str:
     return (
         f"{RED}\n{RED}\n\n"
         f"🚀🚀 БАЛІСТИЧНА ЗАГРОЗА 🚀🚀\n"
-        f"📍 {CITY_NAME}\n\n"
+        f"📍 {CITY_NAME}{suffix}\n\n"
         f"❗❗ НЕГАЙНО В УКРИТТЯ! ❗❗\n\n"
         f"{RED}\n{RED}"
     )
@@ -429,21 +430,21 @@ def kam_line() -> str:
     return f"ℹ️ {CITY_NAME}: {k}"
 
 
-def msg_district_alert() -> str:
+def msg_district_alert(suffix: str = "") -> str:
     return (
         f"{YELLOW}\n\n"
         f"⚠️ ПОВІТРЯНА ТРИВОГА ⚠️\n"
-        f"📍 {DISTRICT_NAME}\n\n"
+        f"📍 {DISTRICT_NAME}{suffix}\n\n"
         f"{kam_line()}\n\n"
         f"{YELLOW}"
     )
 
 
-def msg_district_ballistic() -> str:
+def msg_district_ballistic(suffix: str = "") -> str:
     return (
         f"{RED}\n\n"
         f"🚀🚀 БАЛІСТИКА — {DISTRICT_NAME.upper()} 🚀🚀\n"
-        f"📍 {DISTRICT_NAME}\n\n"
+        f"📍 {DISTRICT_NAME}{suffix}\n\n"
         f"{kam_line()}\n\n"
         f"{RED}"
     )
@@ -526,9 +527,10 @@ def process(mine: list[dict]):
     state.update(active=is_active, ballistic=is_bal)
 
     labels = sorted({l for a in mine for l in threat_labels(a)})
+    state["labels"] = labels
     suffix = f" ({', '.join(labels)})" if labels else ""
     if is_bal and not was_ballistic:
-        return "ballistic", msg_ballistic()
+        return "ballistic", msg_ballistic(suffix)
     if is_active and not was_active:
         return "alert", msg_alert(suffix)
     if was_active and not is_active:
@@ -575,10 +577,14 @@ def process_district(mine: list[dict]):
         d_state["since"] = None
     d_state.update(active=is_active, ballistic=is_bal)
 
+    d_labels = sorted({l for a in mine for l in threat_labels(a)})
+    d_state["labels"] = d_labels
+    d_suffix = f" ({', '.join(d_labels)})" if d_labels else ""
+
     if is_bal and not was_ballistic:
-        return "d_ballistic", msg_district_ballistic()
+        return "d_ballistic", msg_district_ballistic(d_suffix)
     if is_active and not was_active:
-        return "d_alert", msg_district_alert()
+        return "d_alert", msg_district_alert(d_suffix)
     if was_active and not is_active:
         return "d_clear", msg_district_clear()
     if was_ballistic and not is_bal:
@@ -712,12 +718,16 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         t = "🟡⚠️ Триває повітряна тривога."
     else:
         t = "🟢✅ Зараз тихо."
+    if state.get("labels"):
+        t += " (" + ", ".join(state["labels"]) + ")"
     if d_state["ballistic"]:
         d = "🔴🚀 Балістична загроза!"
     elif d_state["active"]:
         d = "🟡⚠️ Триває повітряна тривога."
     else:
         d = "🟢✅ Зараз тихо."
+    if d_state.get("labels"):
+        d += " (" + ", ".join(d_state["labels"]) + ")"
     await update.message.reply_text(f"{CITY_NAME}: {t}\n{DISTRICT_NAME}: {d}", reply_markup=MENU)
 
 
@@ -1012,6 +1022,7 @@ async def h_status(_):
                 "active": True,
                 "ballistic": test["mode"] == "ballistic",
                 "since": test["since"],
+                "labels": ["ТЕСТ: балістика" if test["mode"] == "ballistic" else "ТЕСТ: повітряна тривога"],
                 "test": True,
                 "city": CITY_NAME,
             }
