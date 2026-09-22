@@ -149,6 +149,24 @@ BALLISTIC_KEYWORDS = (
 # (значення поля threats[].threat_type за офіційною документацією devs.alerts.in.ua)
 BALLISTIC_THREAT_TYPES = {"ballistic_missiles"}
 
+# Рівні тривоги за офіційним API (alert_level і threats[].level): red / yellow.
+# ВАЖЛИВО: red НЕ прирівнюється автоматично до балістики — крилаті ракети чи масована
+# хвиля дронів теж можуть мати red, а сирена/Telegram-спам мають лишатись лише для
+# балістики/аеробалістики/високошвидкісних цілей (так було явно попрошено).
+RED_LEVELS = {"red"}
+# Якщо увімкнути (TREAT_RED_UNSPECIFIED_AS_BALLISTIC=1 у Railway): некласифіковані
+# ракети ("unspecified_missiles") червоного рівня теж вважати балістикою.
+# За замовчуванням вимкнено, щоб не підняти хибну балістичну тривогу.
+TREAT_RED_UNSPECIFIED_AS_BALLISTIC = env("TREAT_RED_UNSPECIFIED_AS_BALLISTIC", "0") == "1"
+
+
+def is_red(a: dict) -> bool:
+    """Червоний рівень тривоги (інформаційний прапорець, сирену/спам НЕ вмикає —
+    для цього є окремо is_ballistic)."""
+    if norm(a.get("alert_level")) in RED_LEVELS:
+        return True
+    return any(norm(t.get("level")) in RED_LEVELS for t in (a.get("threats") or []))
+
 
 def is_ballistic(a: dict) -> bool:
     """Балістична/аеробалістична загроза чи високошвидкісна ціль.
@@ -159,6 +177,11 @@ def is_ballistic(a: dict) -> bool:
     """
     threats = a.get("threats") or []
     if any(t.get("threat_type") in BALLISTIC_THREAT_TYPES for t in threats):
+        return True
+    if TREAT_RED_UNSPECIFIED_AS_BALLISTIC and any(
+        t.get("threat_type") == "unspecified_missiles" and norm(t.get("level")) in RED_LEVELS
+        for t in threats
+    ):
         return True
     # Резерв на випадок старого формату відповіді без "threats"
     text = norm(a.get("alert_type")) + " " + norm(a.get("notes"))
@@ -215,18 +238,23 @@ THREAT_TYPE_LABELS = {
 
 
 def threat_labels(a: dict) -> list[str]:
-    """Мітки типів загрози: спершу зі структурованого threats[], і лише якщо
-    його немає — резервний пошук ключових слів у тексті notes."""
+    """Мітки типів загрози: спершу зі структурованого threats[] (з позначкою червоний/
+    жовтий рівень саме ЦІЄЇ загрози), і лише якщо його немає — резервний пошук
+    ключових слів у тексті notes."""
     out = []
     for t in (a.get("threats") or []):
         label = THREAT_TYPE_LABELS.get(t.get("threat_type"))
-        if label and label not in out:
-            out.append(label)
+        if not label:
+            continue
+        mark = "🔴" if norm(t.get("level")) in RED_LEVELS else "🟡"
+        full = f"{mark} {label}"
+        if full not in out:
+            out.append(full)
     if out:
         return out
 
     text = norm(a.get("notes"))
-    fallback = ["Балістика/аеробалістика"] if is_ballistic(a) else []
+    fallback = ["🚀 Балістика/аеробалістика"] if is_ballistic(a) else []
     for kw, label in THREAT_KEYWORDS:
         if kw in text and label not in fallback:
             fallback.append(label)
@@ -258,7 +286,7 @@ if OTHER_SCOPE == "city":
             db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
     db.commit()
 
-state = {"active": False, "ballistic": False, "since": None, "updated": None, "error": None, "labels": []}
+state = {"active": False, "ballistic": False, "red": False, "since": None, "updated": None, "error": None, "labels": []}
 open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute(
@@ -291,7 +319,7 @@ def update_raion(mine: list[dict]):
         r_state["since"] = None
 
 
-d_state = {"active": False, "ballistic": False, "since": None, "labels": []}
+d_state = {"active": False, "ballistic": False, "red": False, "since": None, "labels": []}
 d_open: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute("SELECT api_id, ballistic FROM alerts WHERE ended_at IS NULL AND category='district'")
@@ -491,6 +519,10 @@ def process(mine: list[dict]):
     for aid, a in current.items():
         b = is_ballistic(a)
         if aid not in open_ids:
+            log.info(
+                "ALERT нова id=%s location=%s alert_level=%s threats=%s notes=%s",
+                aid, a.get("location_title"), a.get("alert_level"), a.get("threats"), a.get("notes"),
+            )
             db.execute(
                 "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location, notes, category)"
                 " VALUES(?,?,?,?,?,?,'siren')",
@@ -505,6 +537,10 @@ def process(mine: list[dict]):
             )
             open_ids[aid] = b
         elif b and not open_ids[aid]:
+            log.info(
+                "ALERT ескалація до балістики id=%s location=%s alert_level=%s threats=%s notes=%s",
+                aid, a.get("location_title"), a.get("alert_level"), a.get("threats"), a.get("notes"),
+            )
             db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
             open_ids[aid] = True
         d = describe(a)
@@ -524,7 +560,7 @@ def process(mine: list[dict]):
         state["since"] = now_iso()
     if not is_active:
         state["since"] = None
-    state.update(active=is_active, ballistic=is_bal)
+    state.update(active=is_active, ballistic=is_bal, red=any(is_red(a) for a in mine))
 
     labels = sorted({l for a in mine for l in threat_labels(a)})
     state["labels"] = labels
@@ -549,6 +585,10 @@ def process_district(mine: list[dict]):
     for aid, a in current.items():
         b = is_ballistic(a)
         if aid not in d_open:
+            log.info(
+                "DISTRICT нова id=%s location=%s alert_level=%s threats=%s notes=%s",
+                aid, a.get("location_title"), a.get("alert_level"), a.get("threats"), a.get("notes"),
+            )
             db.execute(
                 "INSERT OR REPLACE INTO alerts(api_id, started_at, alert_type, ballistic, location, notes, category)"
                 " VALUES(?,?,?,?,?,?,'district')",
@@ -556,6 +596,10 @@ def process_district(mine: list[dict]):
             )
             d_open[aid] = b
         elif b and not d_open[aid]:
+            log.info(
+                "DISTRICT ескалація до балістики id=%s location=%s alert_level=%s threats=%s notes=%s",
+                aid, a.get("location_title"), a.get("alert_level"), a.get("threats"), a.get("notes"),
+            )
             db.execute("UPDATE alerts SET ballistic=1 WHERE api_id=?", (aid,))
             d_open[aid] = True
         d = describe(a)
@@ -575,7 +619,7 @@ def process_district(mine: list[dict]):
         d_state["since"] = now_iso()
     if not is_active:
         d_state["since"] = None
-    d_state.update(active=is_active, ballistic=is_bal)
+    d_state.update(active=is_active, ballistic=is_bal, red=any(is_red(a) for a in mine))
 
     d_labels = sorted({l for a in mine for l in threat_labels(a)})
     d_state["labels"] = d_labels
@@ -1021,6 +1065,7 @@ async def h_status(_):
                 },
                 "active": True,
                 "ballistic": test["mode"] == "ballistic",
+                "red": test["mode"] == "ballistic",
                 "since": test["since"],
                 "labels": ["ТЕСТ: балістика" if test["mode"] == "ballistic" else "ТЕСТ: повітряна тривога"],
                 "test": True,
