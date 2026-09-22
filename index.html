@@ -15,185 +15,192 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <title>Тривога — Кам'янське</title>
 <style>
-  :root {
-    --bg:#090c11; --bg-2:#0d1117; --card:#131922; --card-2:#171e28; --border:#232b38; --border-soft:#1a212c;
-    --text:#e9edf3; --dim:#8a94a3; --faint:#525c6b;
-    --ok:#34d399; --ok-bg:#0f2019;
-    --warn:#eab308; --warn-ink:#1c1400;
-    --bad:#f4495c; --bad-ink:#2a0508;
-    --test:#38bdf8; --test-ink:#031824;
-    --radius:14px;
-    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-    --display:'Space Grotesk',var(--sans);
-    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
-  }
-  * { box-sizing:border-box; }
-  html { -webkit-text-size-adjust:100%; }
-  body {
-    margin:0; min-height:100vh; color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.45;
-    background:
-      radial-gradient(900px 480px at 50% -12%, rgba(56,80,120,.16), transparent 60%),
-      var(--bg);
-  }
-  main { max-width:640px; margin:0 auto; padding:22px 16px 56px; }
-  h1 { font-family:var(--display); font-size:1.02rem; font-weight:600; letter-spacing:.01em; color:var(--dim); margin:0 0 16px; display:flex; align-items:baseline; gap:8px; }
-  h1 span#city { color:var(--text); }
-  h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--text); margin:30px 0 10px; }
-  [hidden] { display:none !important; }
-  .muted { color:var(--dim); font-size:.85rem; }
+:root {
+  --bg:#090c11; --bg-2:#0d1117; --card:#131922; --card-2:#171e28; --border:#232b38; --border-soft:#1a212c;
+  --text:#e9edf3; --dim:#8a94a3; --faint:#525c6b;
+  --ok:#34d399; --ok-bg:#0f2019;
+  --warn:#eab308; --warn-ink:#1c1400;
+  --bad:#f4495c; --bad-ink:#2a0508;
+  --test:#38bdf8; --test-ink:#031824;
+  --radius:14px;
+  --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  --display:'Space Grotesk',var(--sans);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+* { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  margin:0; min-height:100vh; color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.45;
+  background:
+    radial-gradient(900px 480px at 50% -12%, rgba(56,80,120,.16), transparent 60%),
+    var(--bg);
+}
+main { max-width:640px; margin:0 auto; padding:22px 16px 56px; }
+h1 { font-family:var(--display); font-size:1.02rem; font-weight:600; letter-spacing:.01em; color:var(--dim); margin:0 0 16px; display:flex; align-items:baseline; gap:8px; }
+h1 span#city { color:var(--text); }
+h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--text); margin:30px 0 10px; }
+[hidden] { display:none !important; }
+.muted { color:var(--dim); font-size:.85rem; }
 
-  /* ---------- Hero status ---------- */
-  .status {
-    position:relative; overflow:hidden; border-radius:20px; padding:34px 22px;
-    text-align:center; background:linear-gradient(180deg,var(--card-2),var(--card));
-    border:1px solid var(--border); transition:background .3s,border-color .3s;
-  }
-  .status .big { font-family:var(--display); font-size:clamp(1.5rem,7vw,2rem); font-weight:700; letter-spacing:-.01em; color:var(--text); }
-  .status .sub { margin-top:8px; font-family:var(--mono); font-size:.82rem; color:var(--dim); }
-  @keyframes pulseBg { 50% { filter:brightness(1.18); } }
+/* ---------- Hero status ---------- */
+.status {
+  position:relative; overflow:hidden; border-radius:20px; padding:34px 22px;
+  text-align:center; background:linear-gradient(180deg,var(--card-2),var(--card));
+  border:1px solid var(--border); transition:background .3s,border-color .3s;
+}
+.status .big { font-family:var(--display); font-size:clamp(1.5rem,7vw,2rem); font-weight:700; letter-spacing:-.01em; color:var(--text); }
+.status .sub { margin-top:8px; font-family:var(--mono); font-size:.82rem; color:var(--dim); }
+@keyframes pulseBg { 50% { filter:brightness(1.18); } }
+.status.alert { background:linear-gradient(180deg,#2a2205,#3a2e05); border-color:#5c4a08; animation:pulseBg 1.3s infinite; }
+.status.alert .big { color:var(--warn); }
+.status.alert .sub { color:#c9a53e; }
+.status.ballistic { background:linear-gradient(180deg,#3a0b10,#4a0d13); border-color:#7a1520; animation:pulseBg .7s infinite; }
+.status.ballistic .big { color:#ff8794; }
+.status.ballistic .sub { color:#ef8f98; }
+.status.test { background:linear-gradient(180deg,#08222f,#0b2c3d); border-color:#134a63; }
+.status.test .big { color:var(--test); }
+.status.error { background:var(--card); border-color:var(--border); border-style:dashed; }
+.status.error .big { color:var(--dim); font-size:1.15rem; }
 
-  .status.alert { background:linear-gradient(180deg,#2a2205,#3a2e05); border-color:#5c4a08; animation:pulseBg 1.3s infinite; }
-  .status.alert .big { color:var(--warn); }
-  .status.alert .sub { color:#c9a53e; }
+/* ---------- Тип загрози: помітний бейдж під основним статусом ---------- */
+.threat { margin-top:14px; display:flex; flex-wrap:wrap; gap:7px; justify-content:center; }
+.threat .pill {
+  padding:6px 14px; border-radius:999px; font-family:var(--mono); font-size:.85rem; font-weight:700;
+  border:1.5px solid; letter-spacing:.01em;
+}
+.threat .pill.warn { color:#ffe08a; border-color:#8a6d10; background:rgba(234,179,8,.18); }
+.threat .pill.bad { color:#ffb3ba; border-color:#a02332; background:rgba(244,73,92,.2); animation:pulseBg .8s infinite; }
+.threat .pill.test { color:#bfe9fb; border-color:#1f6f92; background:rgba(56,189,248,.16); }
 
-  .status.ballistic { background:linear-gradient(180deg,#3a0b10,#4a0d13); border-color:#7a1520; animation:pulseBg .7s infinite; }
-  .status.ballistic .big { color:#ff8794; }
-  .status.ballistic .sub { color:#ef8f98; }
+.stale {
+  display:flex; gap:8px; align-items:flex-start; background:var(--warn-ink); border:1px solid #4a3a06;
+  color:#e6c563; border-radius:12px; padding:11px 13px; margin:0 0 12px; font-size:.86rem; line-height:1.4;
+}
 
-  .status.test { background:linear-gradient(180deg,#08222f,#0b2c3d); border-color:#134a63; }
-  .status.test .big { color:var(--test); }
+/* ---------- Controls ---------- */
+.controls { display:flex; gap:10px; margin:18px 0 6px; flex-wrap:wrap; }
+button {
+  font-family:var(--sans); font-size:.92rem; font-weight:600; cursor:pointer;
+  border-radius:12px; border:1px solid var(--border); background:var(--card); color:var(--text);
+  padding:11px 18px; transition:border-color .15s,background .15s,transform .05s;
+}
+button:active { transform:scale(.98); }
+#soundBtn { flex:1 1 auto; }
+#soundBtn.on { border-color:#1c5f42; background:var(--ok-bg); color:var(--ok); }
+#testBtn { background:transparent; color:var(--dim); font-weight:500; }
+#testBtn:hover { color:var(--text); border-color:var(--faint); }
+.toggle-row { display:flex; align-items:center; gap:8px; margin:4px 0 16px; font-size:.85rem; color:var(--dim); }
+.toggle-row input { accent-color:var(--ok); width:16px; height:16px; }
+#soundMsg:not(:empty) {
+  color:var(--bad); border:1px solid #5c1219; background:var(--bad-ink); border-radius:10px;
+  padding:9px 11px; margin:8px 0; font-size:.85rem; line-height:1.4;
+}
+.err { color:var(--bad); }
 
-  .status.error { background:var(--card); border-color:var(--border); border-style:dashed; }
-  .status.error .big { color:var(--dim); font-size:1.15rem; }
+/* ---------- Health / diagnostics ---------- */
+.health {
+  margin:16px 0; padding:12px 13px; border-radius:12px; border:1px solid var(--border); background:var(--card);
+}
+.health .htitle { font-family:var(--display); font-size:.86rem; font-weight:600; margin-bottom:9px; }
+.health.ok .htitle { color:var(--ok); }
+.health.bad .htitle { color:var(--bad); }
+.chip {
+  display:inline-flex; align-items:center; gap:5px; margin:0 6px 6px 0; padding:4px 10px;
+  border-radius:8px; font-size:.78rem; font-family:var(--mono); border:1px solid; white-space:nowrap;
+}
+.chip.ok { color:var(--ok); border-color:#1c5f42; background:rgba(52,211,153,.08); }
+.chip.bad { color:var(--bad); border-color:#5c1219; background:rgba(244,73,92,.1); }
+.chip.off { color:var(--faint); border-color:var(--border); background:transparent; }
 
-  .stale {
-    display:flex; gap:8px; align-items:flex-start; background:var(--warn-ink); border:1px solid #4a3a06;
-    color:#e6c563; border-radius:12px; padding:11px 13px; margin:0 0 12px; font-size:.86rem; line-height:1.4;
-  }
+/* ---------- Settings disclosure ---------- */
+details {
+  border:1px solid var(--border); border-radius:12px; background:var(--card); margin:10px 0; overflow:hidden;
+}
+details summary {
+  cursor:pointer; padding:12px 14px; font-size:.87rem; font-weight:600; color:var(--dim);
+  list-style:none; display:flex; align-items:center; justify-content:space-between;
+}
+details summary::-webkit-details-marker { display:none; }
+details summary::after { content:'+'; font-family:var(--mono); color:var(--faint); font-weight:400; }
+details[open] summary::after { content:'–'; }
+details .body { padding:2px 14px 14px; }
+details ol { margin:0; padding-left:18px; color:var(--dim); font-size:.85rem; line-height:1.6; }
+details code { font-family:var(--mono); font-size:.82em; background:var(--card-2); padding:1px 5px; border-radius:5px; }
+label.field { display:block; font-size:.85rem; color:var(--dim); margin:8px 0 0; }
+#devName {
+  width:100%; margin-top:6px; background:var(--card-2); border:1px solid var(--border); color:var(--text);
+  border-radius:8px; padding:9px 11px; font-size:.9rem; font-family:var(--sans);
+}
+.hint { color:var(--faint); font-size:.82rem; line-height:1.5; margin:10px 0 0; }
 
-  /* ---------- Controls ---------- */
-  .controls { display:flex; gap:10px; margin:18px 0 6px; flex-wrap:wrap; }
-  button {
-    font-family:var(--sans); font-size:.92rem; font-weight:600; cursor:pointer;
-    border-radius:12px; border:1px solid var(--border); background:var(--card); color:var(--text);
-    padding:11px 18px; transition:border-color .15s,background .15s,transform .05s;
-  }
-  button:active { transform:scale(.98); }
-  #soundBtn { flex:1 1 auto; }
-  #soundBtn.on { border-color:#1c5f42; background:var(--ok-bg); color:var(--ok); }
-  #testBtn { background:transparent; color:var(--dim); font-weight:500; }
-  #testBtn:hover { color:var(--text); border-color:var(--faint); }
-
-  .toggle-row { display:flex; align-items:center; gap:8px; margin:4px 0 16px; font-size:.85rem; color:var(--dim); }
-  .toggle-row input { accent-color:var(--ok); width:16px; height:16px; }
-
-  #soundMsg:not(:empty) {
-    color:var(--bad); border:1px solid #5c1219; background:var(--bad-ink); border-radius:10px;
-    padding:9px 11px; margin:8px 0; font-size:.85rem; line-height:1.4;
-  }
-  .err { color:var(--bad); }
-
-  /* ---------- Health / diagnostics ---------- */
-  .health {
-    margin:16px 0; padding:12px 13px; border-radius:12px; border:1px solid var(--border); background:var(--card);
-  }
-  .health .htitle { font-family:var(--display); font-size:.86rem; font-weight:600; margin-bottom:9px; }
-  .health.ok .htitle { color:var(--ok); }
-  .health.bad .htitle { color:var(--bad); }
-  .chip {
-    display:inline-flex; align-items:center; gap:5px; margin:0 6px 6px 0; padding:4px 10px;
-    border-radius:8px; font-size:.78rem; font-family:var(--mono); border:1px solid; white-space:nowrap;
-  }
-  .chip.ok { color:var(--ok); border-color:#1c5f42; background:rgba(52,211,153,.08); }
-  .chip.bad { color:var(--bad); border-color:#5c1219; background:rgba(244,73,92,.1); }
-  .chip.off { color:var(--faint); border-color:var(--border); background:transparent; }
-
-  /* ---------- Settings disclosure ---------- */
-  details {
-    border:1px solid var(--border); border-radius:12px; background:var(--card); margin:10px 0; overflow:hidden;
-  }
-  details summary {
-    cursor:pointer; padding:12px 14px; font-size:.87rem; font-weight:600; color:var(--dim);
-    list-style:none; display:flex; align-items:center; justify-content:space-between;
-  }
-  details summary::-webkit-details-marker { display:none; }
-  details summary::after { content:'+'; font-family:var(--mono); color:var(--faint); font-weight:400; }
-  details[open] summary::after { content:'–'; }
-  details .body { padding:2px 14px 14px; }
-  details ol { margin:0; padding-left:18px; color:var(--dim); font-size:.85rem; line-height:1.6; }
-  details code { font-family:var(--mono); font-size:.82em; background:var(--card-2); padding:1px 5px; border-radius:5px; }
-  label.field { display:block; font-size:.85rem; color:var(--dim); margin:8px 0 0; }
-  #devName {
-    width:100%; margin-top:6px; background:var(--card-2); border:1px solid var(--border); color:var(--text);
-    border-radius:8px; padding:9px 11px; font-size:.9rem; font-family:var(--sans);
-  }
-  .hint { color:var(--faint); font-size:.82rem; line-height:1.5; margin:10px 0 0; }
-
-  /* ---------- Log ---------- */
-  label.filter { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--dim); margin:0 0 12px; }
-  label.filter input { accent-color:var(--test); width:16px; height:16px; }
-  .wrap { overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
-  table { width:100%; border-collapse:collapse; background:var(--card); font-size:.86rem; }
-  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border-soft); white-space:nowrap; }
-  td:first-child, td:nth-child(2) { font-family:var(--mono); font-size:.82rem; color:var(--dim); }
-  td:nth-child(3) { font-family:var(--mono); font-size:.82rem; }
-  td:last-child { white-space:normal; color:var(--dim); }
-  th { color:var(--faint); font-weight:500; font-size:.76rem; text-transform:uppercase; letter-spacing:.05em; }
-  tr:last-child td { border-bottom:0; }
-  tr.other td { color:var(--faint); }
-  .tag { padding:3px 9px; border-radius:7px; font-size:.75rem; font-weight:600; background:var(--warn); color:var(--warn-ink); }
-  .tag.b { background:var(--bad); color:#fff; }
-  .tag.o { background:var(--card-2); color:var(--dim); border:1px solid var(--border); }
-  .tag.t { background:var(--test); color:var(--test-ink); }
+/* ---------- Log ---------- */
+label.filter { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--dim); margin:0 0 12px; }
+label.filter input { accent-color:var(--test); width:16px; height:16px; }
+.wrap { overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
+table { width:100%; border-collapse:collapse; background:var(--card); font-size:.86rem; }
+th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border-soft); white-space:nowrap; }
+td:first-child, td:nth-child(2) { font-family:var(--mono); font-size:.82rem; color:var(--dim); }
+td:nth-child(3) { font-family:var(--mono); font-size:.82rem; }
+td:last-child { white-space:normal; color:var(--dim); font-weight:600; }
+th { color:var(--faint); font-weight:500; font-size:.76rem; text-transform:uppercase; letter-spacing:.05em; }
+tr:last-child td { border-bottom:0; }
+tr.other td { color:var(--faint); font-weight:400; }
+.tag { padding:3px 9px; border-radius:7px; font-size:.75rem; font-weight:600; background:var(--warn); color:var(--warn-ink); }
+.tag.b { background:var(--bad); color:#fff; }
+.tag.o { background:var(--card-2); color:var(--dim); border:1px solid var(--border); }
+.tag.t { background:var(--test); color:var(--test-ink); }
 </style>
 </head>
 <body>
 <main>
-  <h1>Моніторинг тривог · <span id="city">Кам'янське</span></h1>
-  <div class="stale" id="stale" hidden>⚠️ Немає свіжих даних: браузер призупинив сторінку або пропав зв'язок. Поверніться на вкладку — вона оновиться.</div>
+<h1>Моніторинг тривог · <span id="city">Кам'янське</span></h1>
 
-  <div id="status" class="status">
-    <div class="big" id="big">Завантаження…</div>
-    <div class="sub" id="sub"></div>
-  </div>
+<div class="stale" id="stale" hidden>⚠️ Немає свіжих даних: браузер призупинив сторінку або пропав зв'язок. Поверніться на вкладку — вона оновиться.</div>
 
-  <div class="controls">
-    <button id="soundBtn">🔇 Увімкнути звук</button>
-    <button id="testBtn">▶ Перевірити звук</button>
-  </div>
-  <label class="toggle-row"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
-  <div class="muted" id="soundMsg"></div>
+<div id="status" class="status">
+  <div class="big" id="big">Завантаження…</div>
+  <div class="sub" id="sub"></div>
+</div>
+<div class="threat" id="threat" hidden></div>
 
-  <div class="health" id="health"></div>
+<div class="controls">
+  <button id="soundBtn">🔇 Увімкнути звук</button>
+  <button id="testBtn">▶ Перевірити звук</button>
+</div>
+<label class="toggle-row"><input type="checkbox" id="wakeChk" checked> Не вимикати екран, поки сторінка відкрита</label>
+<div class="muted" id="soundMsg"></div>
 
-  <details>
-    <summary>Пристрій і налаштування Edge</summary>
-    <div class="body">
-      <label class="field">Назва пристрою (для списку сесій)
-        <input id="devName" maxlength="40" placeholder="напр. ПК зміна 1">
-      </label>
-      <ol style="margin-top:14px">
-        <li><b>Сон вкладок:</b> <code>edge://settings/system</code> → «Заощаджуйте ресурси за допомогою вкладок у режимі сну» → вимкніть, або додайте цей сайт у «Ніколи не переводити ці сайти в режим сну».</li>
-        <li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту (тоді звук відновлюється сам після перезавантаження).</li>
-        <li><b>Сповіщення:</b> значок замка в адресному рядку → Сповіщення → Дозволити.</li>
-        <li><b>Режим ефективності:</b> вимкніть для цього ноутбука/ПК на живленні, а в Windows не давайте йому засинати.</li>
-        <li>Найстабільніше: Edge → «Програми» → «Установити цей сайт як програму» і працювати у вікні застосунку. На вкладці з'явиться значок 🔊 — так і має бути.</li>
-      </ol>
-    </div>
-  </details>
-  <div class="hint">Натисніть «Увімкнути звук» один раз: це вмикає звук сирени й режим фонової роботи (сторінка тихо тримає аудіосесію, щоб браузер її не призупиняв). Можна згорнути браузер, але не закривайте вкладку. На iPhone надійніше додати сторінку на екран «Додому» (Поділитись → На початковий екран).</div>
-  <div class="muted" id="updated"></div>
+<div class="health" id="health"></div>
 
-  <h2>Журнал тривог і загроз</h2>
-  <label class="filter"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
-  <div class="wrap">
-    <table>
-      <thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
-      <tbody id="log"><tr><td colspan="5" class="muted">Завантаження…</td></tr></tbody>
-    </table>
-  </div>
+<details>
+<summary>Пристрій і налаштування Edge</summary>
+<div class="body">
+<label class="field">Назва пристрою (для списку сесій)
+<input id="devName" maxlength="40" placeholder="напр. ПК зміна 1">
+</label>
+<ol style="margin-top:14px">
+<li><b>Сон вкладок:</b> <code>edge://settings/system</code> → «Заощаджуйте ресурси за допомогою вкладок у режимі сну» → вимкніть, або додайте цей сайт у «Ніколи не переводити ці сайти в режим сну».</li>
+<li><b>Автозвук:</b> <code>edge://settings/content/mediaAutoplay</code> → «Дозволити» для цього сайту (тоді звук відновлюється сам після перезавантаження).</li>
+<li><b>Сповіщення:</b> значок замка в адресному рядку → Сповіщення → Дозволити.</li>
+<li><b>Режим ефективності:</b> вимкніть для цього ноутбука/ПК на живленні, а в Windows не давайте йому засинати.</li>
+<li>Найстабільніше: Edge → «Програми» → «Установити цей сайт як програму» і працювати у вікні застосунку. На вкладці з'явиться значок 🔊 — так і має бути.</li>
+</ol>
+</div>
+</details>
+
+<div class="hint">Натисніть «Увімкнути звук» один раз: це вмикає звук сирени й режим фонової роботи (сторінка тихо тримає аудіосесію, щоб браузер її не призупиняв). Можна згорнути браузер, але не закривайте вкладку. На iPhone надійніше додати сторінку на екран «Додому» (Поділитись → На початковий екран).</div>
+
+<div class="muted" id="updated"></div>
+
+<h2>Журнал тривог і загроз</h2>
+<label class="filter"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
+<div class="wrap">
+<table>
+<thead><tr><th>Початок</th><th>Кінець</th><th>Тривалість</th><th>Тип</th><th>Коментар</th></tr></thead>
+<tbody id="log"><tr><td colspan="5" class="muted">Завантаження…</td></tr></tbody>
+</table>
+</div>
 </main>
-
 <script>
 const TZ = 'Europe/Kyiv';
 const fmt = iso => iso ? new Date(iso).toLocaleString('uk-UA', {timeZone:TZ, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '—';
@@ -219,7 +226,6 @@ function silentWavUrl() {
   for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.round(KEEPALIVE_AMPLITUDE * Math.sin(2 * Math.PI * 50 * i / rate)), true);
   return URL.createObjectURL(new Blob([buf], {type: 'audio/wav'}));
 }
-
 // Сигнал «втрачено зв'язок»: три коротких гудки 880 Гц
 function beepUrl() {
   const rate = 8000, n = Math.round(rate * 1.4);
@@ -230,13 +236,12 @@ function beepUrl() {
   v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
   w(36, 'data'); v.setUint32(40, n * 2, true);
   for (let i = 0; i < n; i++) {
-    const t = i / rate, phase = t % 0.45;                  // гудок 0.25 с + пауза 0.2 с
+    const t = i / rate, phase = t % 0.45; // гудок 0.25 с + пауза 0.2 с
     const on = phase < 0.25 && t < 1.35;
     v.setInt16(44 + i * 2, on ? Math.round(14000 * Math.sin(2 * Math.PI * 880 * t)) : 0, true);
   }
   return URL.createObjectURL(new Blob([buf], {type: 'audio/wav'}));
 }
-
 const SILENCE = silentWavUrl();
 const BEEP = beepUrl();
 const ALARM_SRC = '/alarm.mp3';
@@ -256,7 +261,6 @@ const staleEl = document.getElementById('stale');
 
 // Помилка завантаження файлу конкретніша за помилку play(), тож не даємо її затерти.
 let srcErrorShown = false;
-
 function onPlayError(e) {
   console.error('audio', e);
   if (e && e.name === 'NotAllowedError') {
@@ -275,21 +279,18 @@ function playSrc(src, loop) {
   if (player.getAttribute('src') !== src) player.src = src;
   player.loop = loop;
   return player.play().catch(e => {
-    if (e && e.name === 'AbortError' && my !== playToken) return;  // нас витіснив новіший виклик
+    if (e && e.name === 'AbortError' && my !== playToken) return; // нас витіснив новіший виклик
     throw e;
   });
 }
-
 function playSilence() {
   mode = 'silence';
   return playSrc(SILENCE, true);
 }
-
 function playSiren(loop) {
   mode = 'siren';
   return playSrc(ALARM_SRC, loop);
 }
-
 // Сигнал втрати зв'язку (не перебиває сирену й ручну перевірку)
 function playBeep() {
   if (!soundOn || blocked || cur !== 'ok' || mode === 'siren') return;
@@ -315,10 +316,9 @@ player.addEventListener('ended', () => {
 });
 
 let lastSirenFix = 0;
-
 function syncSound() {
   if (!soundOn) return;
-  if (Date.now() < testUntil) return;   // йде ручна перевірка — не чіпаємо плеєр
+  if (Date.now() < testUntil) return; // йде ручна перевірка — не чіпаємо плеєр
   // Сирена лунає ТІЛЬКИ при балістичній загрозі й грає безперервно (loop), поки загроза активна.
   // Повітряна тривога (cur === 'alert') і стан 'ok' — фонова тиша: міняються лише колір,
   // текст на головній і системне сповіщення, звуку немає.
@@ -333,22 +333,20 @@ function syncSound() {
     playSiren(true).then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
   }
 }
-
 // Сторож: балістика триває, а сирена чомусь замовкла (система перервала, джерело не догрузилось) — піднімаємо.
 function ensureSiren() {
   if (!soundOn || blocked || cur !== 'ballistic') return;
   if (Date.now() < testUntil) return;
   if (mode === 'siren' && !player.paused) return;
-  if (Date.now() - lastSirenFix < 10000) return;   // даємо час на завантаження, не смикаємо src щотіка
+  if (Date.now() - lastSirenFix < 10000) return; // даємо час на завантаження, не смикаємо src щотіка
   lastSirenFix = Date.now();
   playedFor = null;
   syncSound();
 }
-
 // Аудіо могло бути перервано системою (дзвінок, блокування) — відновлюємо
 function resumeAudio() {
   if (!soundOn) return;
-  if (Date.now() < testUntil) return;   // йде ручна перевірка — не чіпаємо плеєр
+  if (Date.now() < testUntil) return; // йде ручна перевірка — не чіпаємо плеєр
   // player.paused === true і під час завантаження нового джерела, тому не втручаємось,
   // поки плеєр ще не має даних (інакше обірвемо сирену, що саме вантажиться).
   if (player.readyState === 0 && !blocked) return;
@@ -382,7 +380,6 @@ function notify(title, body, loud) {
   if (!loud) return;
   try { if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 800]); } catch (e) {}
 }
-
 function updateTitle(text, artist) {
   document.title = text;
   try {
@@ -409,16 +406,15 @@ btn.onclick = () => {
   }
   renderHealth();
 };
-
 wakeChk.onchange = () => { if (soundOn) { if (wakeChk.checked) acquireWake(); else releaseWake(); } };
 
 testBtn.onclick = () => {
-  testUntil = Date.now() + 15000;   // вікно, у якому фонові перевірки не перемикають джерело
+  testUntil = Date.now() + 15000; // вікно, у якому фонові перевірки не перемикають джерело
   srcErrorShown = false;
   playSiren(false).then(() => { msg.textContent = ''; blocked = false; }).catch(onPlayError);
   setTimeout(() => {
     testUntil = 0;
-    if (mode !== 'siren' || player.ended) return;   // сирену вже завершив обробник 'ended'
+    if (mode !== 'siren' || player.ended) return; // сирену вже завершив обробник 'ended'
     if (cur !== 'ok') { syncSound(); return; }
     if (soundOn) playSilence().catch(onPlayError); else { player.pause(); mode = null; }
   }, 4000);
@@ -430,9 +426,10 @@ document.addEventListener('pointerdown', () => { if (blocked) resumeAudio(); });
 // ---------- Статус ----------
 async function loadStatus() {
   const box = document.getElementById('status'), big = document.getElementById('big'), sub = document.getElementById('sub');
+  const threatBox = document.getElementById('threat');
   try {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 8000);   // зависший запит не має блокувати перевірку
+    const timer = setTimeout(() => ctl.abort(), 8000); // зависший запит не має блокувати перевірку
     let s;
     try {
       const r = await fetch('/api/status', {cache: 'no-store', signal: ctl.signal});
@@ -441,6 +438,7 @@ async function loadStatus() {
     } finally { clearTimeout(timer); }
     lastOk = Date.now();
     document.getElementById('city').textContent = s.city;
+
     const prev = cur;
     cur = 'ok';
     if (s.ballistic) cur = 'ballistic'; else if (s.active) cur = 'alert';
@@ -451,24 +449,45 @@ async function loadStatus() {
     if (s.test) big.textContent = '🧪 ТЕСТ: ' + big.textContent.replace(/^\S+\s/, '');
     if (s.test) sub.textContent += ' · ТЕСТ, реальної загрози немає';
 
+    // Помітний бейдж з конкретним типом загрози: шахед/дрон, крилата ракета,
+    // балістика/аеробалістика, авіація тощо — з поля threats[].threat_type API.
+    const labels = s.labels || [];
+    threatBox.replaceChildren();
+    if (labels.length && cur !== 'ok') {
+      threatBox.hidden = false;
+      const kind = s.test ? 'test' : (cur === 'ballistic' ? 'bad' : 'warn');
+      for (const l of labels) {
+        const p = document.createElement('span');
+        p.className = 'pill ' + kind;
+        p.textContent = l;
+        threatBox.appendChild(p);
+      }
+    } else {
+      threatBox.hidden = true;
+    }
+
     // Дніпровський район свідомо не виводиться на головний екран —
     // ці події лишаються лише в журналі нижче.
-
     const label = cur === 'ballistic' ? '🔴 БАЛІСТИКА' : cur === 'alert' ? '🟡 ТРИВОГА' : '🟢 Тихо';
     updateTitle((s.test ? '🔵 ТЕСТ · ' : '') + label + ' · ' + s.city, label);
-    if (cur !== prev && cur !== 'ok') notify(s.city, cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!', cur === 'ballistic');
+    if (cur !== prev && cur !== 'ok') {
+      const kindText = labels.length ? labels.join(', ') + ' — ' : '';
+      notify(s.city, kindText + (cur === 'ballistic' ? 'БАЛІСТИЧНА ЗАГРОЗА! Негайно в укриття!' : 'Повітряна тривога!'), cur === 'ballistic');
+    }
 
     srcError = s.error || null;
     srcUpdated = s.updated || null;
     const upd = document.getElementById('updated');
     upd.textContent = s.error ? 'Помилка джерела даних: ' + s.error : 'Оновлено: ' + fmt(s.updated);
     upd.className = 'muted' + (s.error ? ' err' : '');
+
     syncSound();
     renderHealth();
   } catch (e) {
     box.className = 'status error';
     big.textContent = 'Немає зв\'язку із сервером';
     sub.textContent = '';
+    threatBox.hidden = true;
     renderHealth();
   }
 }
@@ -476,7 +495,6 @@ async function loadStatus() {
 let showOther = true;
 document.getElementById('otherToggle').onchange = e => { showOther = e.target.checked; loadLog(); };
 const TYPES = {air_raid:'Повітряна', chemical:'Хімічна', radiation:'Радіаційна', other:'Інша'};
-
 async function loadLog() {
   const tbody = document.getElementById('log');
   try {
@@ -511,16 +529,14 @@ function startTicker(fn, ms) {
     const blob = new Blob(['setInterval(function(){postMessage(1)},' + ms + ')'], {type: 'text/javascript'});
     const url = URL.createObjectURL(blob);
     const w = new Worker(url);
-    URL.revokeObjectURL(url);                 // воркер уже стартував, URL більше не потрібен
+    URL.revokeObjectURL(url); // воркер уже стартував, URL більше не потрібен
     w.onmessage = fn;
     window.addEventListener('pagehide', () => w.terminate());
     return;
   } catch (e) {}
   setInterval(fn, ms);
 }
-
 function refreshAll() { loadStatus(); loadLog(); }
-
 let tick = 0;
 startTicker(() => {
   tick++;
@@ -581,7 +597,6 @@ devNameEl.onchange = () => {
   try { localStorage.setItem('devName', devNameEl.value.trim()); } catch (e) {}
   sendHeartbeat();
 };
-
 function sendHeartbeat(closing) {
   const body = closing ? {id: TAB_ID, closing: true} : {
     id: TAB_ID,
@@ -618,30 +633,23 @@ function chip(label, state, text) {
   el.textContent = (state === 'ok' ? '✓ ' : state === 'bad' ? '✕ ' : '– ') + label + ': ' + text;
   return el;
 }
-
 // Зелений — працює, червоний — не працює, сірий — вимкнено за вибором користувача
 function renderHealth() {
   const box = document.getElementById('health');
   const chips = [];
-
   if (!soundOn) chips.push(chip('Звук', 'bad', 'вимкнено'));
   else if (player.paused || blocked) chips.push(chip('Звук', 'bad', blocked ? 'заблоковано браузером' : 'не грає'));
   else chips.push(chip('Звук', 'ok', 'активний'));
-
   if (!wakeChk.checked) chips.push(chip('Екран', 'off', 'може гаснути (за вибором)'));
   else chips.push(wakeLock ? chip('Екран', 'ok', 'не гасне') : chip('Екран', 'bad', 'може згаснути'));
-
   chips.push(lockOn ? chip('Захист від сну', 'ok', 'активний') : chip('Захист від сну', 'bad', 'недоступний'));
-
   const age = Math.round((Date.now() - lastOk) / 1000);
   chips.push(age < 20 ? chip('Дані', 'ok', 'свіжі') : chip('Дані', 'bad', 'немає ' + age + ' с'));
-
   const srcAge = srcUpdated ? (Date.now() - new Date(srcUpdated)) / 1000 : null;
   if (age >= 20) chips.push(chip('Джерело тривог', 'bad', 'невідомо (немає даних)'));
   else if (srcError) chips.push(chip('Джерело тривог', 'bad', 'помилка'));
   else if (srcAge !== null && srcAge > 90) chips.push(chip('Джерело тривог', 'bad', 'не оновлюється'));
   else chips.push(chip('Джерело тривог', 'ok', 'на зв\'язку'));
-
   const bad = chips.some(c => c.classList.contains('bad'));
   const title = document.createElement('div');
   title.className = 'htitle';
@@ -652,7 +660,6 @@ function renderHealth() {
 
 // Page Lifecycle: якщо браузер таки заморозив сторінку — після розморожування одразу оновлюємось
 document.addEventListener('resume', () => { resumeAudio(); refreshAll(); });
-
 holdLock();
 
 // Після перезавантаження/відновлення вкладки самі вмикаємо звук, якщо він був увімкнений
@@ -666,7 +673,6 @@ try {
     if (wakeChk.checked) acquireWake();
   }
 } catch (e) {}
-
 renderHealth();
 refreshAll();
 sendHeartbeat();
