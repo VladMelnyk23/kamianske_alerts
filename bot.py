@@ -2,22 +2,15 @@ import asyncio
 import hmac
 import logging
 import os
-import re
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientSession, ClientTimeout, web
 from telegram import BotCommand, ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
-
-try:
-    from telethon import TelegramClient, events
-    from telethon.sessions import StringSession
-except ImportError:  # telethon не встановлено — фіча вторинного джерела просто вимкнена
-    TelegramClient = events = StringSession = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alarm")
@@ -72,15 +65,6 @@ ADMIN_KEY = env("ADMIN_KEY") or env("TEST_KEY")
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 BASE = Path(__file__).parent
 KYIV = ZoneInfo("Europe/Kyiv")
-
-# ---------- Telegram-парсер (вторинне джерело, telethon) ----------
-# Опційно: якщо не задано TG_API_ID/TG_API_HASH/TG_SESSION — фіча просто вимкнена,
-# усе інше працює як раніше (alerts.in.ua лишається єдиним джерелом).
-TG_API_ID = env("TG_API_ID")
-TG_API_HASH = env("TG_API_HASH")
-TG_SESSION = env("TG_SESSION")  # рядок сесії з одноразового tg_login.py
-TG_CHANNELS = [c.strip().lstrip("@") for c in env("TG_CHANNELS", "radar_raketaa").split(",") if c.strip()]
-TG_LOOKBACK_MIN = max(5, int(env("TG_LOOKBACK_MIN", "60")))  # скільки хвилин історії сканувати на старті тривоги
 
 # ---------- База даних ----------
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -269,8 +253,6 @@ THREAT_TYPE_LABELS = {
 # Крилаті ракети): уточнюють, ЩО САМЕ за боєприпас, а не замінюють загальну категорію.
 SPECIFIC_KEYWORDS = [
     ("циркон", "Циркон"),
-    ("онікс", "Онікс"),
-    ("оникс", "Онікс"),
     ("кинджал", "Кинджал"),
     ("іскандер-м", "Іскандер-М"),
     ("іскандер", "Іскандер"),
@@ -314,50 +296,6 @@ def threat_labels(a: dict) -> list[str]:
     return out
 
 
-# ---------- Ключові слова для вторинного джерела (Telegram-канали) ----------
-# Тут навмисно НЕ підв'язуємось до alert_type/threats[] alerts.in.ua — це вільний
-# текст сторонніх каналів, тому шукаємо за словами з межами слова (\b), щоб
-# "дніпро" не зловило "дніпропетровська область" тощо.
-_TG_LOCATION_WORDS = [
-    # Кам'янське — всі відмінки, укр. та рос. написання (варіативність у чатах велика)
-    "кам'янське", "кам'янського", "кам'янському", "кам'янським",
-    "каменское", "каменского", "каменскому", "каменским",
-    # Дніпро — місто (НЕ область: "дніпропетровськ" сюди не підпадає завдяки \b)
-    "дніпро", "дніпра", "дніпру", "дніпром", "дніпрі",
-    "днепр", "днепра", "днепру", "днепром", "днепре",
-]
-_TG_BALLISTIC_WORDS = [
-    "балістик", "аеробалістик", "баллистик", "аэробаллистик",
-    "гіперзвук", "гиперзвук",
-    "високошвидкісн", "высокоскоростн", "швидкісна ціль", "скоростная цель",
-    "кинджал", "кинжал",
-    "іскандер", "искандер",
-    "кн-23", "kn-23",
-    "онікс", "оникс",
-    "циркон",
-]
-
-
-def _tg_pattern(words: list[str], whole_word: bool = False) -> "re.Pattern":
-    """whole_word=True — точне слово (з межами \\b з обох боків): потрібно для
-    локацій, бо інакше "дніпро" ловить і "Дніпропетровська область" як підрядок.
-    whole_word=False — межа лише на початку слова, бо ключові слова загроз навмисно
-    є основами ("балістик" має ловити "балістика"/"балістичну"/"балістичний")."""
-    body = "(?:" + "|".join(re.escape(w) for w in words) + ")"
-    return re.compile(r"\b" + body + (r"\b" if whole_word else ""), re.IGNORECASE)
-
-
-TG_LOCATION_RE = _tg_pattern(_TG_LOCATION_WORDS, whole_word=True)
-TG_BALLISTIC_RE = _tg_pattern(_TG_BALLISTIC_WORDS, whole_word=False)
-
-
-def tg_text_matches(text: str) -> bool:
-    """Повідомлення з Telegram-каналу стосується Кам'янського/Дніпра І балістики/
-    високошвидкісної цілі одночасно — лише тоді це підтвердження, а не шум."""
-    t = norm(text)
-    return bool(TG_LOCATION_RE.search(t) and TG_BALLISTIC_RE.search(t))
-
-
 def describe(a: dict, place: str | None = None) -> str:
     """Коментар до тривоги: тип загрози (шахеди, балістика...) або примітка з API.
     Якщо задано place — коментар починається з "м. {place}: ", щоб у журналі
@@ -385,11 +323,7 @@ if OTHER_SCOPE == "city":
             db.execute("DELETE FROM alerts WHERE api_id=?", (_r["api_id"],))
     db.commit()
 
-state = {
-    "active": False, "ballistic": False, "missile": False, "red": False,
-    "since": None, "updated": None, "error": None, "labels": [],
-    "secondary_ballistic": False, "secondary_text": None, "secondary_confirmed_at": None,
-}
+state = {"active": False, "ballistic": False, "missile": False, "red": False, "since": None, "updated": None, "error": None, "labels": []}
 open_ids: dict[int, bool] = {
     r["api_id"]: bool(r["ballistic"])
     for r in db.execute(
@@ -434,43 +368,7 @@ d_desc: dict[int, str] = {
 if d_open:
     d_state.update(active=True, ballistic=any(d_open.values()))
 tg_app: Application | None = None
-tg_client: "TelegramClient | None" = None  # telethon-клієнт вторинного джерела (якщо налаштовано)
-test = {"mode": None, "until": 0.0, "since": None, "id": None, "notify": False, "secondary": False, "secondary_at": None}
-
-
-seen_tg_messages: set[str] = set()  # унікальні ID вже оброблених Telegram-повідомлень (channel:msg_id)
-
-
-def confirm_secondary(text: str, msg_key: str | None = None):
-    """Викликається, коли в Telegram-каналі знайдено збіг (локація + балістика/
-    високошвидкісна ціль). Діє лише поки триває тривога по Кам'янському —
-    вторинне джерело ПІДСИЛЮЄ вже активну офіційну тривогу, а не замінює її.
-    Спрацьовує на КОЖНЕ нове цільове ПОВІДОМЛЕННЯ (не лише перше за тривогу) —
-    навіть якщо текст майже той самий: канали часто повторюють схоже
-    формулювання ("балістика на Кам'янське/Дніпро") у кількох окремих постах
-    по мірі розвитку ситуації, і кожен такий новий пост має знову підняти
-    сирену. Де-дублікація йде за msg_key (унікальний ID повідомлення в
-    Telegram), а не за текстом — щоб те саме повідомлення не оброблялось
-    двічі (напр. якщо потрапило і в сканування історії, і в живий потік)."""
-    if not state["active"]:
-        return
-    if msg_key is not None:
-        if msg_key in seen_tg_messages:
-            return
-        seen_tg_messages.add(msg_key)
-    snippet = " ".join(text.split())[:200]
-    log.info("TELEGRAM підтвердження балістики: %s", snippet)
-    state["secondary_ballistic"] = True
-    state["secondary_text"] = snippet
-    state["secondary_confirmed_at"] = now_iso()
-
-
-def reset_secondary():
-    state["secondary_ballistic"] = False
-    state["secondary_text"] = None
-    state["secondary_confirmed_at"] = None
-    seen_tg_messages.clear()  # нова тривога — старі ID більше не актуальні для де-дублікації
-
+test = {"mode": None, "until": 0.0, "since": None, "id": None, "notify": False}
 
 
 def close_test():
@@ -672,8 +570,6 @@ def process(mine: list[dict]):
     labels = sorted({l for a in mine for l in threat_labels(a)})
     state["labels"] = labels
     suffix = f" ({', '.join(labels)})" if labels else ""
-    if not is_active and was_active:
-        reset_secondary()  # тривога закінчилась — підтвердження з Telegram більше не актуальне
     if is_bal and not was_ballistic:
         return "ballistic", msg_ballistic(suffix)
     if is_active and not was_active:
@@ -772,57 +668,6 @@ def process_other(others: list[dict]) -> tuple[list[dict], list[dict]]:
     return new, closed
 
 
-async def telegram_scan_recent():
-    """Викликається одразу при старті нової тривоги по Кам'янському: перевіряє
-    останні TG_LOOKBACK_MIN хвилин історії каналів — раптом збіг уже там,
-    ще до того, як з'явилось нове повідомлення. Бере НАЙНОВІШИЙ збіг (перший
-    за порядком, бо iter_messages іде від найновіших до старіших)."""
-    if tg_client is None or not state["active"]:
-        return
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=TG_LOOKBACK_MIN)
-    try:
-        for channel in TG_CHANNELS:
-            async for msg in tg_client.iter_messages(channel, limit=300):
-                if msg.date and msg.date < cutoff:
-                    break  # повідомлення й далі йдуть старіше — далі сенсу шукати нема
-                if msg.text and tg_text_matches(msg.text):
-                    confirm_secondary(msg.text, msg_key=f"{channel}:{msg.id}")
-                    return
-    except Exception as e:
-        log.warning("telegram_scan_recent помилка: %s", e)
-
-
-async def telegram_watcher():
-    """Фоновий слухач Telegram-каналів (вторинне джерело). Працює лише якщо
-    задано TG_API_ID/TG_API_HASH/TG_SESSION — інакше тихо вимкнений, і все
-    інше в застосунку працює як і раніше на alerts.in.ua."""
-    global tg_client
-    if TelegramClient is None:
-        log.warning("telethon не встановлено — вторинне джерело Telegram вимкнене")
-        return
-    if not (TG_API_ID and TG_API_HASH and TG_SESSION):
-        log.warning("TG_API_ID/TG_API_HASH/TG_SESSION не задані — вторинне джерело Telegram вимкнене")
-        return
-    while True:
-        try:
-            client = TelegramClient(StringSession(TG_SESSION), int(TG_API_ID), TG_API_HASH)
-
-            @client.on(events.NewMessage(chats=TG_CHANNELS))
-            async def _on_message(event):
-                text = event.raw_text or ""
-                if state["active"] and tg_text_matches(text):
-                    confirm_secondary(text, msg_key=f"{event.chat_id}:{event.id}")
-
-            await client.start()
-            tg_client = client
-            log.info("Telegram-слухач підключено: %s", ", ".join(TG_CHANNELS))
-            await client.run_until_disconnected()
-        except Exception as e:
-            log.error("telegram_watcher помилка, перепідключення за 30с: %s", e)
-            tg_client = None
-            await asyncio.sleep(30)
-
-
 async def poller(session: ClientSession):
     while True:
         if test["mode"] and time.time() >= test["until"]:
@@ -845,8 +690,6 @@ async def poller(session: ClientSession):
             state.update(updated=now_iso(), error=None)
             if res:
                 kind, msg = res
-                if kind == "alert":  # нова активація тривоги по Кам'янському (незалежно від missile/ballistic)
-                    asyncio.create_task(telegram_scan_recent())
                 coro = send_alert_message(msg, kind == "ballistic", lambda: state["ballistic"])
                 if coro:
                     await coro
@@ -1235,9 +1078,6 @@ async def h_status(_):
                 "red": test["mode"] in ("ballistic", "missile"),
                 "since": test["since"],
                 "labels": [test_label],
-                "secondary_ballistic": test.get("secondary", False),
-                "secondary_text": "ТЕСТ: симуляція підтвердження з Telegram" if test.get("secondary") else None,
-                "secondary_confirmed_at": test.get("secondary_at"),
                 "test": True,
                 "city": CITY_NAME,
             }
@@ -1256,8 +1096,7 @@ async def h_status(_):
 
 
 async def h_test(request: web.Request):
-    """/api/test?key=ПАРОЛЬ&type=alert|missile|ballistic|off&seconds=60&notify=1&secondary=1
-    secondary=1 — симулює підтвердження з Telegram (для перевірки ескалації missile→ballistic на сторінці)."""
+    """/api/test?key=ПАРОЛЬ&type=alert|missile|ballistic|off&seconds=60&notify=1"""
     if not TEST_KEY:
         return web.json_response({"error": "Задайте змінну TEST_KEY у Railway"}, status=403)
     q = request.query
@@ -1284,8 +1123,7 @@ async def h_test(request: web.Request):
          f"ТЕСТ: {label}" + (" + Telegram" if q.get("notify") == "1" else "")),
     )
     db.commit()
-    test.update(mode=kind, until=time.time() + seconds, since=since, id=tid, notify=q.get("notify") == "1",
-                secondary=q.get("secondary") == "1", secondary_at=since if q.get("secondary") == "1" else None)
+    test.update(mode=kind, until=time.time() + seconds, since=since, id=tid, notify=q.get("notify") == "1")
     if q.get("notify") == "1":
         text = msg_test(label)
         coro = send_alert_message(
@@ -1346,8 +1184,6 @@ async def main():
         await tg_app.updater.start_polling()
     else:
         log.warning("BOT_TOKEN не задано — працює тільки веб.")
-
-    asyncio.create_task(telegram_watcher())
 
     async with ClientSession(timeout=ClientTimeout(total=15)) as session:
         await poller(session)
