@@ -75,7 +75,6 @@ h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--te
 .threat .pill.ping { color:#ffc394; border-color:#8a5410; background:rgba(234,140,8,.18); animation:pulseBg 1.1s infinite; }
 .threat .pill.bad { color:#ffb3ba; border-color:#a02332; background:rgba(244,73,92,.2); animation:pulseBg .8s infinite; }
 .threat .pill.test { color:#bfe9fb; border-color:#1f6f92; background:rgba(56,189,248,.16); }
-.threat .pill.wide { width:100%; border-radius:12px; text-align:left; font-weight:500; white-space:normal; line-height:1.4; }
 
 .stale {
   display:flex; gap:8px; align-items:flex-start; background:var(--warn-ink); border:1px solid #4a3a06;
@@ -258,13 +257,12 @@ player.preload = 'auto';
 player.setAttribute('playsinline', '');
 let soundOn = false, cur = 'ok', playedFor = null, mode = null, blocked = false;
 let lastOk = Date.now(), wakeLock = null, lockOn = false, lastBeep = 0, srcError = null, srcUpdated = null;
-// Сирена при балістиці грає рівно 30 секунд, пілікання при ракетній загрозі — рівно 15 секунд,
-// один раз при вході у відповідний стан — далі тиша, навіть якщо загроза триває.
+// Сирена при балістиці й пілікання при ракетній загрозі грають РІВНО раз, 30 секунд,
+// при вході у відповідний стан — далі тиша, навіть якщо загроза триває.
 let sirenFinishedFor = null, sirenTimer = null;
 let pingedFor = null, pingFinishedFor = null, pingTimer = null;
-let lastSecondaryConfirmedAt = null; // остання оброблена подія підтвердження з Telegram
 const SIREN_DURATION_MS = 30000;
-const PING_DURATION_MS = 15000;
+const PING_DURATION_MS = 30000;
 // playToken серіалізує перемикання джерела: зміна src обриває попередній play() з AbortError,
 // testUntil захищає ручну перевірку звуку від фонових перевірок (syncSound / resumeAudio / playBeep).
 let playToken = 0, testUntil = 0;
@@ -506,24 +504,9 @@ async function loadStatus() {
 
     const prev = cur;
     cur = 'ok';
-    if (s.ballistic || s.secondary_ballistic) cur = 'ballistic';
+    if (s.ballistic) cur = 'ballistic';
     else if (s.missile) cur = 'missile';
     else if (s.active) cur = 'alert';
-
-    // Кожне НОВЕ цільове повідомлення з Telegram (навіть під час уже активної
-    // балістичної тривоги) має знову запустити повну сирену — cur сам по собі
-    // не зміниться (був і лишається 'ballistic'), тож форсуємо перезапуск явно.
-    if (cur !== 'ballistic') {
-      lastSecondaryConfirmedAt = null;
-    } else if (s.secondary_confirmed_at && s.secondary_confirmed_at !== lastSecondaryConfirmedAt) {
-      const isFirstSeen = lastSecondaryConfirmedAt === null;
-      lastSecondaryConfirmedAt = s.secondary_confirmed_at;
-      if (!isFirstSeen) {
-        sirenFinishedFor = null;
-        playedFor = null;
-      }
-    }
-
     box.className = 'status ' + (s.test ? 'test' : (cur === 'ok' ? '' : cur));
     if (cur === 'ballistic') { big.textContent = '🚀 БАЛІСТИЧНА ЗАГРОЗА'; sub.textContent = 'Негайно в укриття! З ' + fmt(s.since); }
     else if (cur === 'missile') { big.textContent = '📡 РАКЕТНА ЗАГРОЗА'; sub.textContent = 'З ' + fmt(s.since); }
@@ -534,24 +517,15 @@ async function loadStatus() {
 
     // Помітний бейдж з конкретним типом загрози: шахед/дрон, крилата ракета,
     // балістика/аеробалістика, авіація тощо — з поля threats[].threat_type API.
-    // Якщо загрозу підтверджено з Telegram-каналу — сюди ж додається сам текст
-    // того повідомлення, у тому самому помітному кольоровому блоці.
     const labels = s.labels || [];
     threatBox.replaceChildren();
-    const hasThreatInfo = (labels.length && cur !== 'ok') || s.secondary_text;
-    if (hasThreatInfo) {
+    if (labels.length && cur !== 'ok') {
       threatBox.hidden = false;
       const kind = s.test ? 'test' : (cur === 'ballistic' ? 'bad' : cur === 'missile' ? 'ping' : 'warn');
       for (const l of labels) {
         const p = document.createElement('span');
         p.className = 'pill ' + kind;
         p.textContent = l;
-        threatBox.appendChild(p);
-      }
-      if (s.secondary_text) {
-        const p = document.createElement('span');
-        p.className = 'pill bad wide';
-        p.textContent = '📡 ' + s.secondary_text;
         threatBox.appendChild(p);
       }
     } else {
