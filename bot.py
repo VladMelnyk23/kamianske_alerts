@@ -12,6 +12,13 @@ from aiohttp import ClientSession, ClientTimeout, web
 from telegram import BotCommand, ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+try:
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+except ImportError:  # додайте "telethon" у requirements.txt, щоб увімкнути віджет
+    TelegramClient = None
+    StringSession = None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alarm")
 
@@ -65,6 +72,15 @@ ADMIN_KEY = env("ADMIN_KEY") or env("TEST_KEY")
 API_URL = "https://api.alerts.in.ua/v1/alerts/active.json"
 BASE = Path(__file__).parent
 KYIV = ZoneInfo("Europe/Kyiv")
+
+# ---------- Віджет «останні повідомлення» (Telethon, читає як користувач) ----------
+TG_API_ID = env("TG_API_ID")
+TG_API_HASH = env("TG_API_HASH")
+TG_SESSION = env("TG_SESSION")
+# Один канал або кілька через кому: "@kanal" / "kanal" / -100XXXXXXXXXX
+TG_CHANNELS = [c.strip() for c in env("TG_CHANNELS").split(",") if c.strip()]
+TG_FEED_LIMIT = max(1, min(50, int(env("TG_FEED_LIMIT", "10"))))
+TG_FEED_POLL_SECONDS = max(20, int(env("TG_FEED_POLL_SECONDS", "60")))
 
 # ---------- База даних ----------
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -668,6 +684,76 @@ def process_other(others: list[dict]) -> tuple[list[dict], list[dict]]:
     return new, closed
 
 
+tg_feed = {"messages": [], "updated": None, "error": None}
+
+
+def _tg_link(channel: str, msg_id: int) -> str | None:
+    """Посилання працює лише для публічних каналів (@назва), не для приватних/id."""
+    handle = channel.lstrip("@")
+    if handle.lstrip("-").isdigit():
+        return None
+    return f"https://t.me/{handle}/{msg_id}"
+
+
+async def tg_feed_poller():
+    """Читає останні повідомлення каналу(ів) через Telethon-акаунт (TG_API_ID/HASH/SESSION)
+    і кладе їх у tg_feed для віджета на головній. Працює лише на читання, нічого не публікує."""
+    if TelegramClient is None:
+        log.warning("Пакет telethon не встановлено — віджет останніх повідомлень вимкнено.")
+        tg_feed["error"] = "telethon не встановлено на сервері"
+        return
+    if not (TG_API_ID and TG_API_HASH and TG_SESSION and TG_CHANNELS):
+        log.warning("TG_API_ID/TG_API_HASH/TG_SESSION/TG_CHANNELS не задано — віджет вимкнено.")
+        return
+    try:
+        api_id = int(TG_API_ID)
+    except ValueError:
+        log.error("TG_API_ID має бути числом")
+        tg_feed["error"] = "TG_API_ID має бути числом"
+        return
+
+    client = TelegramClient(StringSession(TG_SESSION), api_id, TG_API_HASH)
+    try:
+        await client.start()
+    except Exception as e:
+        log.error("Telethon не зміг увійти (TG_SESSION протух?): %s", e)
+        tg_feed["error"] = f"вхід не вдався: {e}"
+        return
+
+    while True:
+        try:
+            items = []
+            for ch in TG_CHANNELS:
+                entity = await client.get_entity(ch)
+                title = getattr(entity, "title", None) or ch
+                async for m in client.iter_messages(entity, limit=TG_FEED_LIMIT):
+                    text = (m.message or "").strip()
+                    if not text and not m.media:
+                        continue
+                    items.append(
+                        {
+                            "id": m.id,
+                            "channel": title,
+                            "date": m.date.isoformat() if m.date else None,
+                            "text": text,
+                            "media": bool(m.media) and not text,
+                            "link": _tg_link(ch, m.id),
+                        }
+                    )
+            items.sort(key=lambda x: x["date"] or "", reverse=True)
+            tg_feed["messages"] = items[:TG_FEED_LIMIT]
+            tg_feed["updated"] = now_iso()
+            tg_feed["error"] = None
+        except Exception as e:
+            log.error("tg_feed_poller error: %s", e)
+            tg_feed["error"] = str(e)
+        await asyncio.sleep(TG_FEED_POLL_SECONDS)
+
+
+async def h_tg_feed(_):
+    return web.json_response(tg_feed)
+
+
 async def poller(session: ClientSession):
     while True:
         if test["mode"] and time.time() >= test["until"]:
@@ -1145,6 +1231,10 @@ async def main():
     log.info("Змінні середовища (лише назви): %s", sorted(repr(k) for k in os.environ if not k.startswith("RAILWAY_")))
     log.info("ALERTS_TOKEN: %s", f"задано ({len(ALERTS_TOKEN)} символів)" if ALERTS_TOKEN else "НЕ ЗАДАНО")
     log.info("BOT_TOKEN: %s", "задано" if BOT_TOKEN else "НЕ ЗАДАНО")
+    log.info(
+        "Віджет останніх повідомлень: %s",
+        f"канали {TG_CHANNELS}" if (TG_API_ID and TG_API_HASH and TG_SESSION and TG_CHANNELS) else "вимкнено (немає TG_API_ID/TG_API_HASH/TG_SESSION/TG_CHANNELS)",
+    )
 
     web_app = web.Application()
     web_app.add_routes(
@@ -1155,6 +1245,7 @@ async def main():
             web.get("/icon.svg", h_icon),
             web.get("/api/status", h_status),
             web.get("/api/log", h_log),
+            web.get("/api/tg_feed", h_tg_feed),
             web.get("/api/test", h_test),
             web.post("/api/heartbeat", h_heartbeat),
             web.get("/api/sessions", h_sessions_api),
@@ -1184,6 +1275,8 @@ async def main():
         await tg_app.updater.start_polling()
     else:
         log.warning("BOT_TOKEN не задано — працює тільки веб.")
+
+    asyncio.create_task(tg_feed_poller())
 
     async with ClientSession(timeout=ClientTimeout(total=15)) as session:
         await poller(session)
