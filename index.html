@@ -81,6 +81,22 @@ h2 { font-family:var(--display); font-size:1rem; font-weight:600; color:var(--te
   color:#e6c563; border-radius:12px; padding:11px 13px; margin:0 0 12px; font-size:.86rem; line-height:1.4;
 }
 
+/* ---------- Останні повідомлення (Telegram) ---------- */
+.tgfeed { margin:16px 0; border:1px solid var(--border); border-radius:14px; background:var(--card); overflow:hidden; }
+.tgfeed-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:12px 14px 8px; }
+.tgfeed-title { font-family:var(--display); font-size:.9rem; font-weight:600; color:var(--text); }
+.tgfeed-sub { font-size:.76rem; color:var(--faint); font-family:var(--mono); white-space:nowrap; }
+.tgfeed-list { max-height:340px; overflow-y:auto; }
+.tgfeed-item { padding:10px 14px; border-top:1px solid var(--border-soft); }
+.tgfeed-item:first-child { border-top:0; }
+.tgfeed-meta { display:flex; gap:8px; align-items:baseline; font-size:.74rem; color:var(--faint); font-family:var(--mono); margin-bottom:3px; }
+.tgfeed-text { font-size:.87rem; line-height:1.45; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
+.tgfeed-text.media { color:var(--dim); font-style:italic; }
+.tgfeed-link { display:inline-block; margin-top:5px; font-size:.78rem; color:var(--test); text-decoration:none; }
+.tgfeed-link:hover { text-decoration:underline; }
+.tgfeed-empty { padding:14px; font-size:.85rem; color:var(--dim); }
+.tgfeed-empty.err { color:var(--bad); }
+
 /* ---------- Controls ---------- */
 .controls { display:flex; gap:10px; margin:18px 0 6px; flex-wrap:wrap; }
 button {
@@ -168,6 +184,14 @@ tr.other td { color:var(--faint); font-weight:400; }
   <div class="sub" id="sub"></div>
 </div>
 <div class="threat" id="threat" hidden></div>
+
+<div class="tgfeed" id="tgfeed" hidden>
+  <div class="tgfeed-head">
+    <span class="tgfeed-title">📣 Останні повідомлення</span>
+    <span class="tgfeed-sub" id="tgfeedSub"></span>
+  </div>
+  <div class="tgfeed-list" id="tgfeedList"></div>
+</div>
 
 <div class="controls">
   <button id="soundBtn">🔇 Увімкнути звук</button>
@@ -613,6 +637,54 @@ async function loadLog() {
   } catch (e) {}
 }
 
+// ---------- Останні повідомлення каналу (Telegram, оновлюється на сервері) ----------
+const tgBox = document.getElementById('tgfeed');
+const tgList = document.getElementById('tgfeedList');
+const tgSub = document.getElementById('tgfeedSub');
+async function loadTgFeed() {
+  try {
+    const r = await fetch('/api/tg_feed', {cache: 'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if (data.error && !(data.messages || []).length) {
+      tgBox.hidden = false;
+      tgSub.textContent = '';
+      tgList.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'tgfeed-empty err';
+      empty.textContent = 'Недоступно: ' + data.error;
+      tgList.appendChild(empty);
+      return;
+    }
+    const msgs = data.messages || [];
+    if (!msgs.length) { tgBox.hidden = true; return; }
+    tgBox.hidden = false;
+    tgSub.textContent = data.updated ? 'оновлено ' + fmt(data.updated) : '';
+    tgList.innerHTML = '';
+    for (const m of msgs) {
+      const item = document.createElement('div');
+      item.className = 'tgfeed-item';
+      const meta = document.createElement('div');
+      meta.className = 'tgfeed-meta';
+      meta.textContent = [m.channel, fmt(m.date)].filter(Boolean).join(' · ');
+      item.appendChild(meta);
+      const body = document.createElement('div');
+      body.className = 'tgfeed-text' + (m.media ? ' media' : '');
+      body.textContent = m.text || '[повідомлення без тексту]';
+      item.appendChild(body);
+      if (m.link) {
+        const a = document.createElement('a');
+        a.href = m.link; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.className = 'tgfeed-link'; a.textContent = 'Відкрити в Telegram →';
+        item.appendChild(a);
+      }
+      tgList.appendChild(item);
+    }
+  } catch (e) {
+    // мережева помилка чи сервер ще не встиг прогрітись — тихо пропускаємо цей тік
+  }
+}
+
 // ---------- Опитування: Web Worker-таймер не так гальмується у фоні, як setInterval ----------
 function startTicker(fn, ms) {
   try {
@@ -626,12 +698,12 @@ function startTicker(fn, ms) {
   } catch (e) {}
   setInterval(fn, ms);
 }
-function refreshAll() { loadStatus(); loadLog(); }
+function refreshAll() { loadStatus(); loadLog(); loadTgFeed(); }
 let tick = 0;
 startTicker(() => {
   tick++;
   loadStatus();
-  if (tick % 6 === 0) loadLog();
+  if (tick % 6 === 0) { loadLog(); loadTgFeed(); }
   if (tick % 2 === 0) sendHeartbeat();
   const age = Date.now() - lastOk;
   staleEl.hidden = age < 30000;
