@@ -13,11 +13,12 @@ from telegram import BotCommand, ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 try:
-    from telethon import TelegramClient
+    from telethon import TelegramClient, events
     from telethon.sessions import StringSession
 except ImportError:  # додайте "telethon" у requirements.txt, щоб увімкнути віджет
     TelegramClient = None
     StringSession = None
+    events = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alarm")
@@ -80,7 +81,9 @@ TG_SESSION = env("TG_SESSION")
 # Один канал або кілька через кому: "@kanal" / "kanal" / -100XXXXXXXXXX
 TG_CHANNELS = [c.strip() for c in env("TG_CHANNELS").split(",") if c.strip()]
 TG_FEED_LIMIT = max(1, min(50, int(env("TG_FEED_LIMIT", "10"))))
-TG_FEED_POLL_SECONDS = max(20, int(env("TG_FEED_POLL_SECONDS", "60")))
+# Основне оновлення — миттєве, через push-подію NewMessage. Це лише страховка на випадок
+# розриву з'єднання/пропущеної події, тож інтервал може бути великим (за замовч. 10 хв).
+TG_FEED_RESYNC_SECONDS = max(60, int(env("TG_FEED_RESYNC_SECONDS", "600")))
 
 # ---------- База даних ----------
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -685,6 +688,8 @@ def process_other(others: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 tg_feed = {"messages": [], "updated": None, "error": None}
+# Безпечна межа на кількість елементів у пам'яті (з запасом понад TG_FEED_LIMIT для editing/reconnect).
+_TG_FEED_BUFFER = 200
 
 
 def _tg_link(channel: str, msg_id: int) -> str | None:
@@ -695,9 +700,50 @@ def _tg_link(channel: str, msg_id: int) -> str | None:
     return f"https://t.me/{handle}/{msg_id}"
 
 
+def _tg_item(channel_key: str, title: str, m) -> dict | None:
+    text = (m.message or "").strip()
+    if not text and not m.media:
+        return None
+    return {
+        "id": m.id,
+        "chat": channel_key,
+        "channel": title,
+        "date": m.date.isoformat() if m.date else None,
+        "text": text,
+        "media": bool(m.media) and not text,
+        "link": _tg_link(channel_key, m.id),
+    }
+
+
+def _tg_feed_publish(items: list[dict]):
+    """Мердж нових/змінених items у tg_feed, найновіші зверху, без дублів за id+chat."""
+    by_key = {(it["chat"], it["id"]): it for it in tg_feed["messages"]}
+    for it in items:
+        by_key[(it["chat"], it["id"])] = it
+    merged = sorted(by_key.values(), key=lambda x: x["date"] or "", reverse=True)[:_TG_FEED_BUFFER]
+    tg_feed["messages"] = merged
+    tg_feed["updated"] = now_iso()
+    tg_feed["error"] = None
+
+
+async def _tg_feed_backfill(client, entities: dict):
+    """Одноразово (і потім раз на кілька хвилин як страховка) тягне останні повідомлення —
+    для першого наповнення віджета і на випадок, якщо push-подія загубилась при розриві з'єднання."""
+    items = []
+    for ch, entity in entities.items():
+        title = getattr(entity, "title", None) or ch
+        async for m in client.iter_messages(entity, limit=TG_FEED_LIMIT):
+            it = _tg_item(ch, title, m)
+            if it:
+                items.append(it)
+    if items:
+        _tg_feed_publish(items)
+
+
 async def tg_feed_poller():
-    """Читає останні повідомлення каналу(ів) через Telethon-акаунт (TG_API_ID/HASH/SESSION)
-    і кладе їх у tg_feed для віджета на головній. Працює лише на читання, нічого не публікує."""
+    """Тримає Telethon-клієнт (TG_API_ID/HASH/SESSION) підключеним і оновлює tg_feed
+    МИТТЄВО через push-подію NewMessage — без опитування каналу за таймером.
+    Працює лише на читання, нічого не публікує."""
     if TelegramClient is None:
         log.warning("Пакет telethon не встановлено — віджет останніх повідомлень вимкнено.")
         tg_feed["error"] = "telethon не встановлено на сервері"
@@ -720,38 +766,59 @@ async def tg_feed_poller():
         tg_feed["error"] = f"вхід не вдався: {e}"
         return
 
-    while True:
+    entities: dict[str, object] = {}
+    for ch in TG_CHANNELS:
         try:
-            items = []
-            for ch in TG_CHANNELS:
-                entity = await client.get_entity(ch)
-                title = getattr(entity, "title", None) or ch
-                async for m in client.iter_messages(entity, limit=TG_FEED_LIMIT):
-                    text = (m.message or "").strip()
-                    if not text and not m.media:
-                        continue
-                    items.append(
-                        {
-                            "id": m.id,
-                            "channel": title,
-                            "date": m.date.isoformat() if m.date else None,
-                            "text": text,
-                            "media": bool(m.media) and not text,
-                            "link": _tg_link(ch, m.id),
-                        }
-                    )
-            items.sort(key=lambda x: x["date"] or "", reverse=True)
-            tg_feed["messages"] = items[:TG_FEED_LIMIT]
-            tg_feed["updated"] = now_iso()
-            tg_feed["error"] = None
+            entities[ch] = await client.get_entity(ch)
         except Exception as e:
-            log.error("tg_feed_poller error: %s", e)
-            tg_feed["error"] = str(e)
-        await asyncio.sleep(TG_FEED_POLL_SECONDS)
+            log.error("tg_feed: не вдалося знайти канал %s: %s", ch, e)
+    if not entities:
+        tg_feed["error"] = "жоден канал з TG_CHANNELS не знайдено"
+        return
+
+    titles = {ch: (getattr(ent, "title", None) or ch) for ch, ent in entities.items()}
+    chat_key_by_id = {ent.id: ch for ch, ent in entities.items()}
+
+    @client.on(events.NewMessage(chats=list(entities.values())))
+    async def _on_new(event):
+        ch = chat_key_by_id.get(event.chat_id)
+        if ch is None:
+            return
+        it = _tg_item(ch, titles[ch], event.message)
+        if it:
+            _tg_feed_publish([it])
+            log.info("tg_feed: нове повідомлення у %s (id=%s)", ch, it["id"])
+
+    @client.on(events.MessageEdited(chats=list(entities.values())))
+    async def _on_edit(event):
+        ch = chat_key_by_id.get(event.chat_id)
+        if ch is None:
+            return
+        it = _tg_item(ch, titles[ch], event.message)
+        if it:
+            _tg_feed_publish([it])
+
+    try:
+        await _tg_feed_backfill(client, entities)
+    except Exception as e:
+        log.error("tg_feed: початкове наповнення не вдалось: %s", e)
+        tg_feed["error"] = str(e)
+
+    log.info("tg_feed: слухаю нові повідомлення (push, без опитування) у %s", list(entities))
+
+    # Страховка на випадок втраченого з'єднання/пропущеної події — не основний шлях оновлення.
+    while True:
+        await asyncio.sleep(TG_FEED_RESYNC_SECONDS)
+        if not client.is_connected():
+            continue
+        try:
+            await _tg_feed_backfill(client, entities)
+        except Exception as e:
+            log.error("tg_feed: фоновий ресинк не вдався: %s", e)
 
 
 async def h_tg_feed(_):
-    return web.json_response(tg_feed)
+    return web.json_response({**tg_feed, "messages": tg_feed["messages"][:TG_FEED_LIMIT]})
 
 
 async def poller(session: ClientSession):
