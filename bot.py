@@ -13,12 +13,11 @@ from telegram import BotCommand, ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 try:
-    from telethon import TelegramClient, events
+    from telethon import TelegramClient
     from telethon.sessions import StringSession
 except ImportError:  # додайте "telethon" у requirements.txt, щоб увімкнути віджет
     TelegramClient = None
     StringSession = None
-    events = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("alarm")
@@ -81,9 +80,9 @@ TG_SESSION = env("TG_SESSION")
 # Один канал або кілька через кому: "@kanal" / "kanal" / -100XXXXXXXXXX
 TG_CHANNELS = [c.strip() for c in env("TG_CHANNELS").split(",") if c.strip()]
 TG_FEED_LIMIT = max(1, min(50, int(env("TG_FEED_LIMIT", "10"))))
-# Основне оновлення — миттєве, через push-подію NewMessage. Це лише страховка на випадок
-# розриву з'єднання/пропущеної події, тож інтервал може бути великим (за замовч. 10 хв).
-TG_FEED_RESYNC_SECONDS = max(60, int(env("TG_FEED_RESYNC_SECONDS", "600")))
+# Опитування каналу за таймером. 15 с — компроміс між швидкістю і навантаженням на Telegram;
+# нижче ~10 с підвищує ризик FloodWait, якщо каналів або підписників на цей акаунт багато.
+TG_FEED_POLL_SECONDS = max(5, int(env("TG_FEED_POLL_SECONDS", "15")))
 
 # ---------- База даних ----------
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -741,8 +740,9 @@ async def _tg_feed_backfill(client, entities: dict):
 
 
 async def tg_feed_poller():
-    """Тримає Telethon-клієнт (TG_API_ID/HASH/SESSION) підключеним і оновлює tg_feed
-    МИТТЄВО через push-подію NewMessage — без опитування каналу за таймером.
+    """Читає останні повідомлення каналу(ів) через Telethon-акаунт (TG_API_ID/HASH/SESSION)
+    і кладе їх у tg_feed для віджета на головній. Опитування за таймером (TG_FEED_POLL_SECONDS);
+    entity кожного каналу резолвиться один раз при старті, а не на кожному тіку.
     Працює лише на читання, нічого не публікує."""
     if TelegramClient is None:
         log.warning("Пакет telethon не встановлено — віджет останніх повідомлень вимкнено.")
@@ -776,45 +776,15 @@ async def tg_feed_poller():
         tg_feed["error"] = "жоден канал з TG_CHANNELS не знайдено"
         return
 
-    titles = {ch: (getattr(ent, "title", None) or ch) for ch, ent in entities.items()}
-    chat_key_by_id = {ent.id: ch for ch, ent in entities.items()}
+    log.info("tg_feed: опитую %s кожні %s с", list(entities), TG_FEED_POLL_SECONDS)
 
-    @client.on(events.NewMessage(chats=list(entities.values())))
-    async def _on_new(event):
-        ch = chat_key_by_id.get(event.chat_id)
-        if ch is None:
-            return
-        it = _tg_item(ch, titles[ch], event.message)
-        if it:
-            _tg_feed_publish([it])
-            log.info("tg_feed: нове повідомлення у %s (id=%s)", ch, it["id"])
-
-    @client.on(events.MessageEdited(chats=list(entities.values())))
-    async def _on_edit(event):
-        ch = chat_key_by_id.get(event.chat_id)
-        if ch is None:
-            return
-        it = _tg_item(ch, titles[ch], event.message)
-        if it:
-            _tg_feed_publish([it])
-
-    try:
-        await _tg_feed_backfill(client, entities)
-    except Exception as e:
-        log.error("tg_feed: початкове наповнення не вдалось: %s", e)
-        tg_feed["error"] = str(e)
-
-    log.info("tg_feed: слухаю нові повідомлення (push, без опитування) у %s", list(entities))
-
-    # Страховка на випадок втраченого з'єднання/пропущеної події — не основний шлях оновлення.
     while True:
-        await asyncio.sleep(TG_FEED_RESYNC_SECONDS)
-        if not client.is_connected():
-            continue
         try:
             await _tg_feed_backfill(client, entities)
         except Exception as e:
-            log.error("tg_feed: фоновий ресинк не вдався: %s", e)
+            log.error("tg_feed_poller: %s", e)
+            tg_feed["error"] = str(e)
+        await asyncio.sleep(TG_FEED_POLL_SECONDS)
 
 
 async def h_tg_feed(_):
