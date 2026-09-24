@@ -704,7 +704,7 @@ startTicker(() => {
   tick++;
   loadStatus();
   if (tick % 6 === 0) loadLog();
-  if (tick % 2 === 0) loadTgFeed(); // дешевий read з пам'яті сервера — можна частіше, ніж журнал
+  if (tick % 3 === 0) loadTgFeed(); // синхронно з бекендом: опитує канал раз на ~15 с
   if (tick % 2 === 0) sendHeartbeat();
   const age = Date.now() - lastOk;
   staleEl.hidden = age < 30000;
