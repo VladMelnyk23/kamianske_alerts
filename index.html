@@ -185,6 +185,13 @@ tr.other td { color:var(--faint); font-weight:400; }
 </div>
 <div class="threat" id="threat" hidden></div>
 
+<div class="tgfeed" id="tgfeed" hidden>
+  <div class="tgfeed-head">
+    <span class="tgfeed-title">📣 Останні повідомлення</span>
+    <span class="tgfeed-sub" id="tgfeedSub"></span>
+  </div>
+  <div class="tgfeed-list" id="tgfeedList"></div>
+</div>
 
 <div class="controls">
   <button id="soundBtn">🔇 Увімкнути звук</button>
@@ -215,14 +222,6 @@ tr.other td { color:var(--faint); font-weight:400; }
 
 <div class="muted" id="updated"></div>
 
-<div class="tgfeed" id="tgfeed" hidden>
-  <div class="tgfeed-head">
-    <span class="tgfeed-title">📣 Останні повідомлення</span>
-    <span class="tgfeed-sub" id="tgfeedSub"></span>
-  </div>
-  <div class="tgfeed-list" id="tgfeedList"></div>
-</div>
-  
 <h2>Журнал тривог і загроз</h2>
 <label class="filter"><input type="checkbox" id="otherToggle" checked> Показувати інші загрози та Дніпровський район (без сирени)</label>
 <div class="wrap">
@@ -704,7 +703,8 @@ let tick = 0;
 startTicker(() => {
   tick++;
   loadStatus();
-  if (tick % 6 === 0) { loadLog(); loadTgFeed(); }
+  if (tick % 6 === 0) loadLog();
+  if (tick % 2 === 0) loadTgFeed(); // дешевий read з пам'яті сервера — можна частіше, ніж журнал
   if (tick % 2 === 0) sendHeartbeat();
   const age = Date.now() - lastOk;
   staleEl.hidden = age < 30000;
